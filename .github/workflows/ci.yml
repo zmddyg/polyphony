@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }} regression suite
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Verify Python helper syntax
+        run: python3 -m py_compile studio/tools/material-import-*.py
+      - name: Enable real PDF and PowerPoint import tests
+        if: matrix.node == 24
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libreoffice-impress python3-uno
+          python3 -m venv "$RUNNER_TEMP/polyphony-pdf"
+          "$RUNNER_TEMP/polyphony-pdf/bin/python" -m pip install 'PyMuPDF>=1.24,<2'
+          echo "POLYPHONY_PDF_PYTHON=$RUNNER_TEMP/polyphony-pdf/bin/python" >> "$GITHUB_ENV"
+          echo 'POLYPHONY_LIBREOFFICE_PYTHON=/usr/bin/python3' >> "$GITHUB_ENV"
+      - name: Run zero-dependency test suite
+        working-directory: studio
+        run: npm test
+      - name: Verify offline standalone exports stay in sync
+        working-directory: studio
+        run: |
+          node tools/export-offline.mjs /tmp/共演演示室.html
+          node tools/export-offline.mjs --challenges /tmp/Polyphony-Playlab.html
+          diff -u ../共演演示室.html /tmp/共演演示室.html
+          diff -u ../Polyphony-Playlab.html /tmp/Polyphony-Playlab.html

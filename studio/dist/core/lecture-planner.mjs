@@ -4,13 +4,19 @@ const patterns = [
   ['rc', /\bRC\b.{0,40}(?:电路|充电|放电|暂态|时间常数|circuit|charg)|(?:一阶|电容).{0,30}(?:充放电|充电|放电|时间常数|换路)/iu],
   ['history', /史料互证|史料.{0,20}(?:来源|对照|核对)|(?:primary sources?).{0,28}(?:compar|corroborat)/iu],
   ['blackbox', /(?:数字|函数|数列|规则).{0,15}黑箱|(?:黑箱|black.box).{0,30}(?:输入|规则|input|rule)/iu],
+  ['inquiry', /(?:思考题|课堂讨论|概念辨析|随堂测验|小组讨论|例题\s*\d|判断正误|下列(?:哪种|哪项|说法)|为什么[^。\n]{4,40}[？?]|conceptual\s+check|think.?pair.?share)/iu],
 ];
 export const lecturePlanKinds = patterns.map(([kind]) => kind);
 const modelPageLimit = 72;
 
+const normalizeSpace = text => String(text ?? '').replace(/\s+/gu, ' ').trim();
+const compactSpace = text => String(text ?? '').replace(/\s+/gu, '');
+
 export function plannerPages(material) {
   return (material?.pages ?? []).filter(page => !page.hidden).map(page => ({
-    number:page.number,title:String(page.title ?? '').slice(0,160),text:String(page.text ?? '').slice(0,550),
+    number: page.number,
+    title: String(page.title ?? '').slice(0, 160),
+    text: String(page.text ?? '').slice(0, 550),
   }));
 }
 
@@ -27,31 +33,41 @@ export function localLecturePlan(pages) {
   for (const page of pages) {
     const text = page.title + ' ' + page.text;
     for (const [kind, pattern] of patterns) {
+      if (kind === 'inquiry' && normalizeSpace(text).length < 24) continue;
       const match = text.match(pattern);
       if (!match) continue;
       suggestions.push({ pageNumber: page.number, kind, reason: '本页提到「' + match[0] + '」。' });
       break;
     }
   }
-  return {source:'local',suggestions,scannedPages:pages.length,totalPages:pages.length};
+  return { source: 'local', suggestions, scannedPages: pages.length, totalPages: pages.length };
 }
 
 export function challengeForFrame(frame) {
   if (!frame) return null;
-  const page = {number: frame.pageNumber, title: frame.title, text: (frame.body ?? []).join(' ')};
+  if (frame.experiment?.kind) return frame.experiment.kind;
+  const page = { number: frame.pageNumber, title: frame.title, text: (frame.body ?? []).join(' ') };
   const kind = localLecturePlan([page]).suggestions[0]?.kind;
-  return kind === 'mzi' ? 'light' : kind === 'rc' ? 'rc' : null;
+  return kind === 'mzi' ? 'light' : kind === 'rc' ? 'rc' : kind === 'blackbox' ? 'blackbox' : null;
 }
 
 export function validatePlanSuggestions(raw, pages) {
   if (!Array.isArray(raw?.suggestions) || raw.suggestions.length > pages.length) throw Error('排课建议格式无效。');
   const seen = new Set();
-  return raw.suggestions.map(item => {
+  const accepted = [];
+  for (const item of raw.suggestions) {
     const page = pages.find(row => row.number === item?.pageNumber);
-    if (!page || seen.has(page.number) || !lecturePlanKinds.includes(item.kind) ||
-        typeof item.quote !== 'string' || !item.quote.trim() || item.quote.length>96 ||
-        !(page.title+' '+page.text).includes(item.quote)) throw Error('排课建议没有可核对的原页引文。');
+    if (!page || seen.has(page.number) || !lecturePlanKinds.includes(item.kind)) continue;
+    if (typeof item.quote !== 'string' || !item.quote.trim() || item.quote.length > 96) continue;
+    const source = page.title + ' ' + page.text;
+    const compactQuote = compactSpace(item.quote);
+    const matched = source.includes(item.quote)
+      || normalizeSpace(source).includes(normalizeSpace(item.quote))
+      || (compactQuote.length >= 4 && compactSpace(source).includes(compactQuote));
+    if (!matched) continue;
     seen.add(page.number);
-    return {pageNumber:page.number, kind:item.kind, reason:'原页写有「'+item.quote+'」。'};
-  });
+    accepted.push({ pageNumber: page.number, kind: item.kind, reason: '原页写有「' + item.quote.trim() + '」。' });
+  }
+  if (raw.suggestions.length > 0 && !accepted.length) throw Error('排课建议没有可核对的原页引文。');
+  return accepted;
 }

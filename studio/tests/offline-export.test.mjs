@@ -45,7 +45,7 @@ test('standalone exports include lazy dependencies and route styles', async () =
     const diagram = studioHtml.match(/id="polyphony-architecture"[^>]*>([^<]+)<\/script>/)?.[1];
     assert.ok(diagram);
     const svg = await readFile(new URL('../dist/assets/architecture.svg', import.meta.url), 'utf8');
-    assert.equal(Buffer.from(diagram, 'base64').toString('utf8'), svg.replace(/^\uFEFF/, ''));
+    assert.equal(Buffer.from(diagram, 'base64').toString('utf8'), svg.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n'));
     assert.ok(!modules['@polyphony/app.mjs'].includes(diagram), 'the app does not contain another copy of the diagram');
 
     assert.ok(embeddedModules(playlabHtml)['@polyphony/views/challenge-preview.mjs']);

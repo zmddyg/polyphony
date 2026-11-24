@@ -72,6 +72,18 @@
 .cx-live {max-width:1300px; margin:auto; padding:12px clamp(10px,2.2vw,28px) 24px}
 .cx-live .lecture-backbar {padding:0 0 18px; color:#526477}
 .lecture-pager [data-lecture-action="experiment"][hidden] {display:none}
+.cx-blackbox-stage {display:grid; gap:18px; padding:18px 0 14px}
+.cx-bb-seeds {display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px}
+.cx-bb-seeds > div {display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border-radius:9px; background:#19394b; border:1px solid #2b5063; font-size:.86rem; color:#c5dce3}
+.cx-bb-seeds strong {color:var(--cx-amber); font:650 1rem Consolas,monospace}
+.cx-bb-flow {display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.15fr) minmax(0,1fr); align-items:center; gap:12px}
+.cx-bb-port {display:grid; gap:6px; text-align:center; padding:16px 10px; border-radius:11px; background:#173647; border:1px solid #2d5569}
+.cx-bb-port span {font-size:.82rem; color:#b8d1d9}
+.cx-bb-port strong {font:700 clamp(1.35rem,3vw,2.1rem)/1.2 Consolas,monospace; color:#f4fbff}
+.cx-bb-port--out strong {color:var(--cx-mint)}
+.cx-bb-box {display:grid; gap:4px; text-align:center; padding:22px 12px; border-radius:12px; background:linear-gradient(155deg,#1d4961,#0f2a3a); border:1.5px solid #4897b3; color:#effaff}
+.cx-bb-box b {font-size:1.05rem}
+.cx-bb-box small {color:#9fd7e6; font-family:Consolas,monospace; font-size:.85rem}
 .lab-tabs {flex-wrap:wrap}
 @container (width < 485px) {
   .lab-tabs:has([data-lab-action="light"]) {display:grid; grid-template-columns:1fr 1fr}
@@ -83,4 +95,5 @@
   .cx-chart {margin-top:4px}
   .cx-axis {font-size:18px}
   .cx-controls h3 {margin-bottom:11px}
+  .cx-bb-flow {grid-template-columns:1fr}
 }

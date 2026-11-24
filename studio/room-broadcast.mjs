@@ -24,9 +24,9 @@ function replaceListItems({ text, ends }, replacements) {
 }
 
 // The anonymous projection supplies the shared fields and list entries for every public view.
-// Only the viewer's participant, answers, vote and appearance as the draw winner vary.
+// Only the viewer's participant, answers, vote, pulse and appearance as the draw winner vary.
 export function createPublicRoomEncoder(room) {
-  const { participants, responses, experiment, winner, ...shared } = projectRoom(room, 'stage', null);
+  const { participants, responses, experiment, winner, myPulse: _ignoredPulse, ...shared } = projectRoom(room, 'stage', null);
   const fullProjection = participantId => JSON.stringify(projectRoom(room, 'student', participantId));
   const roster = new Map();
   for (const [index, participant] of room.participants.entries()) {
@@ -52,21 +52,25 @@ export function createPublicRoomEncoder(room) {
   for (const { id, choice } of room.experiment?.votes ?? []) {
     if (!votes.has(id)) votes.set(id, choice ?? null);
   }
+  const hasLecture = Boolean(room.lecture);
+  const pulsed = new Set(hasLecture ? (room.lecturePulses?.[String(room.lecture.pageNumber)] ?? []) : []);
   const projectedParticipants = encodeList(participants);
   const projectedResponses = encodeList(responses);
   const base = JSON.stringify(shared).slice(0, -1);
   const anonymousWinner = JSON.stringify(winner);
   const noVote = experiment === undefined ? '' : `,"experiment":${JSON.stringify(experiment)}`;
   const experimentByVote = new Map([[null, noVote]]);
-  const encode = (people, answers, selected, activity) =>
-    `${base},"participants":[${people}],"responses":[${answers}],"winner":${selected}${activity}}`;
+  const encode = (people, answers, selected, activity, pulse) =>
+    `${base},"participants":[${people}],"responses":[${answers}],"winner":${selected}${activity}${pulse}}`;
   let anonymous;
   return participantId => {
     const participant = roster.get(participantId);
     const answers = ownAnswers.get(participantId);
     const vote = votes.get(participantId) ?? null;
-    if (participantId == null || (!participant && !answers && vote === null)) {
-      return anonymous ??= encode(projectedParticipants.text, projectedResponses.text, anonymousWinner, noVote);
+    const isPulsed = hasLecture && participantId != null && pulsed.has(participantId);
+    const pulseField = hasLecture ? `,"myPulse":${isPulsed}` : '';
+    if (participantId == null || (!participant && !answers && vote === null && !isPulsed)) {
+      return anonymous ??= encode(projectedParticipants.text, projectedResponses.text, anonymousWinner, noVote, hasLecture ? ',"myPulse":false' : '');
     }
 
     const visibleParticipants = participant ? replaceListItems(projectedParticipants, [participant]) : projectedParticipants.text;
@@ -86,6 +90,6 @@ export function createPublicRoomEncoder(room) {
     }
     const visibleWinner = participant && participantId === room.winner?.id ? JSON.stringify(participant.value) : anonymousWinner;
     if (!experimentByVote.has(vote)) experimentByVote.set(vote, `,"experiment":${JSON.stringify({ ...experiment, myVote: vote })}`);
-    return encode(visibleParticipants, visibleResponses, visibleWinner, experimentByVote.get(vote));
+    return encode(visibleParticipants, visibleResponses, visibleWinner, experimentByVote.get(vote), pulseField);
   };
 }

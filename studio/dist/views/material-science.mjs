@@ -1,4 +1,5 @@
 import { buildSciencePacket, formatScienceNumber, reviewRcSolution, scienceModels } from '../core/teaching-science.mjs';
+import { isSafeMathML } from '../core/mathml.mjs';
 import { esc, icon } from '../ui.mjs';
 
 const curveColors = ['#315be8', '#0f766e', '#9b5317'];
@@ -227,8 +228,12 @@ export function mountMaterialScience(root, { anchor, onAdopt, adoptedPacket, mod
       previews[shown]?.setAttribute('aria-pressed', 'false');
       previews[index].setAttribute('aria-pressed', 'true');
       const slide = packet.slides[index];
+      const mathBlocks = (slide.formulas ?? []).filter(isSafeMathML);
+      const mathHtml = mathBlocks.length
+        ? `<div class="psci-formulas">${mathBlocks.map(m => `<div class="psci-formula-block">${m}</div>`).join('')}</div>`
+        : '';
       slideMarkup[index] ??= `<h4>${esc(slide.title)}</h4>
-        ${slide.body.map(line => `<p>${esc(line)}</p>`).join('')}${renderScienceChart(slide)}`;
+        ${slide.body.map(line => `<p>${esc(line)}</p>`).join('')}${mathHtml}${renderScienceChart(slide)}`;
       slideHost.innerHTML = slideMarkup[index];
       shown = index;
     }

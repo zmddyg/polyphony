@@ -1,0 +1,33 @@
+services:
+  polyphony:
+    build:
+      context: ./studio
+      dockerfile: Dockerfile
+    ports:
+      - "${PORT:-4188}:4188"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "4188"
+      # Switch to /data/rooms.db (and optionally POLYPHONY_STORAGE=sqlite) for high-concurrency WAL persistence
+      POLYPHONY_ROOM_FILE: "${POLYPHONY_ROOM_FILE:-/data/rooms.db}"
+      POLYPHONY_STORAGE: "${POLYPHONY_STORAGE:-sqlite}"
+      POLYPHONY_ROOM_TTL_HOURS: "${POLYPHONY_ROOM_TTL_HOURS:-72}"
+      POLYPHONY_PUBLIC_ORIGIN: "${POLYPHONY_PUBLIC_ORIGIN:-}"
+      POLYPHONY_TEACHER_PASSPHRASE: "${POLYPHONY_TEACHER_PASSPHRASE:-}"
+      POLYPHONY_AI_BASE_URL: "${POLYPHONY_AI_BASE_URL:-}"
+      POLYPHONY_AI_MODEL: "${POLYPHONY_AI_MODEL:-}"
+      POLYPHONY_AI_KEY: "${POLYPHONY_AI_KEY:-}"
+      POLYPHONY_AI_OUTPUT_MODE: "${POLYPHONY_AI_OUTPUT_MODE:-json_object}"
+      POLYPHONY_JEV_KEY: "${POLYPHONY_JEV_KEY:-}"
+    volumes:
+      - polyphony_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4188/api/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  polyphony_data:

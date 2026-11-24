@@ -321,11 +321,14 @@ const chromium = chromiumPath();
 test('browser imports real PowerPoint ZIP bytes offline and preserves page lineage and visible content', {
   skip: !chromium && 'Install Chromium or set POLYPHONY_TEST_CHROMIUM to run the offline PPTX import regression.',
 }, async () => {
-  const [reader, archive] = await Promise.all([
+  const [reader, archive, mathml] = await Promise.all([
     readFile(new URL('../dist/core/pptx-reader.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../dist/core/pptx-package.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../dist/core/mathml.mjs', import.meta.url), 'utf8'),
   ]);
-  const module = moduleDataUrl(reader.replace('./pptx-package.mjs', moduleDataUrl(archive)));
+  const module = moduleDataUrl(reader
+    .replace('./pptx-package.mjs', moduleDataUrl(archive))
+    .replace('./mathml.mjs', moduleDataUrl(mathml)));
   const bytes = zip(fixtureEntries()).toString('base64');
   const result = await runInChromium(chromium,
     '(async () => {' +
@@ -353,6 +356,9 @@ test('browser imports real PowerPoint ZIP bytes offline and preserves page linea
   assert.match(first.text, /公开版实验资料/u);
   assert.match(first.text, /实验室原始标注/u);
   assert.doesNotMatch(first.text, /Click to edit|教师私下说明|教师备注/u);
+  assert.equal(first.speakerNotes, '教师备注应留在原件');
+  assert.ok(Array.isArray(first.formulas) && first.formulas.length === 1);
+  assert.match(first.formulas[0], /<math[^>]*>.*<mfrac>.*<msup>.*<\/math>/u);
   assert.deepEqual(first.images.map(({ sourcePath }) => sourcePath), ['poly/media/eq pic.png']);
   assert.equal(first.preview, undefined);
   assert.ok(first.warnings.some(message => message.includes('外链图片')));

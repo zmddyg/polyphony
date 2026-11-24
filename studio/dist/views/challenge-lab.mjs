@@ -1,8 +1,14 @@
-import { advanceChallenge, angularStep, blindAngles, challengeNames, diagnoses, fullCurveRms, initialSamples, lightAt, newChallenge, pointCount, presetTarget, probes, publicChallenge, rcReading, voteChoices } from '../core/challenge-lab.mjs';
+import {
+  advanceChallenge, angularStep, blackboxDiagnoses, blackboxInputs, blackboxReading, blindAngles,
+  challengeNames, diagnoses, fullCurveRms, initialSamples, lightAt, newChallenge, normalizeRcParams,
+  pointCount, presetTarget, publicChallenge, rcProbes, rcReading, voteChoices,
+} from '../core/challenge-lab.mjs';
 
 const renderedChallenges = new WeakMap();
 const percent = value => Number((100 * value).toFixed(1)) + '%';
 const points = value => Number((100 * value).toFixed(1)) + ' 个百分点';
+const formatNum = value => Number(Number(value).toPrecision(6));
+const formatSigned = value => value < 0 ? '−' + Math.abs(value) : String(value);
 const primary = (action, label) => `<button type="button" class="cx-primary" data-cx-action="${action}">${label}</button>`;
 const summary = (title, text) => `<p class="cx-summary"><b>${title}</b>${text}</p>`;
 const plot = {left: 52, right: 642, top: 27, bottom: 229};
@@ -36,17 +42,23 @@ function ballotHint(role) {
 }
 
 function rcCircuit(state) {
-  const result = probes.find(item => item.id === state.probe);
+  const params = normalizeRcParams(state.params);
+  const activeProbes = rcProbes(params);
+  const result = activeProbes.find(item => item.id === state.probe);
+  const rText = formatNum(params.resistanceKohm) + ' kΩ';
+  const cText = formatNum(params.capacitanceNf) + ' nF';
+  const vFinal = formatNum(params.finalV) + ' V';
+  const vInit = formatNum(params.initialV) + ' V';
   return `<figure class="cx-instrument">
-    <figcaption><span>RC 故障台</span><span>理想阶跃 · 5 V</span></figcaption>
-    <svg class="cx-circuit" viewBox="0 0 620 260" role="img" aria-label="5 伏阶跃电源串联标称 10 千欧电阻与 100 纳法电容；电容初始电压为零。">
+    <figcaption><span>RC 故障台</span><span>理想阶跃 · ${vInit} → ${vFinal}</span></figcaption>
+    <svg class="cx-circuit" viewBox="0 0 620 260" role="img" aria-label="${vFinal} 阶跃电源串联标称 ${rText} 电阻与 ${cText} 电容；电容初始电压为 ${vInit}。">
       <g fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
         <path d="M105 112V66H234l7-10 10 20 10-20 10 20 10-20 10 20 7-10H458V129M458 145v61H105v-42"/>
         <circle cx="105" cy="138" r="26"/><path d="M97 128h16m-8-8v16m-8 15h16M434 129h48m-48 16h48"/>
       </g>
       <g fill="currentColor" font-family="inherit" font-size="17">
-        <text x="264" y="36" text-anchor="middle">R · 标称 10 kΩ</text><text x="419" y="146" text-anchor="end">C · 标称 100 nF</text>
-        <text x="105" y="239" text-anchor="middle">5 V</text>
+        <text x="264" y="36" text-anchor="middle">R · 标称 ${rText}</text><text x="419" y="146" text-anchor="end">C · 标称 ${cText}</text>
+        <text x="105" y="239" text-anchor="middle">${vFinal}</text>
       </g>
     </svg>
     <div class="cx-meter"><span>${result ? result.label : '仪表读数'}</span><strong>${result ? state.reading.toFixed(2) + ' ' + result.unit : '待测量'}</strong></div>
@@ -55,28 +67,75 @@ function rcCircuit(state) {
 
 function rcBody(state, role) {
   const operate = canOperate(role);
+  const params = normalizeRcParams(state.params);
+  const activeProbes = rcProbes(params);
+  const faultyTau = formatNum((2 * params.resistanceKohm * params.capacitanceNf) / 1000);
+  const deltaV = formatNum(params.finalV - params.initialV);
   let heading, body;
   if (state.step === 'measure') {
     heading = '这次测什么？';
-    body = choices(probes, 'measure', state, role) + ballotHint(role);
+    body = choices(activeProbes, 'measure', state, role) + ballotHint(role);
   } else if (state.step === 'diagnose') {
     heading = '这条读数支持哪种判断？';
     body = choices(diagnoses, 'diagnose', state, role) + ballotHint(role);
   } else {
-    const unit = probes.find(item => item.id === state.probe).unit;
+    const unit = activeProbes.find(item => item.id === state.probe).unit;
     const selected = diagnoses.find(item => item.id === state.choice).label;
     const why = {
-      early: '两台电路的时间常数都是 2 ms。即使把整条电容充电曲线都录下来，它们仍会重合。',
+      early: `两台电路的时间常数都是 ${faultyTau} ms。即使把整条电容充电曲线都录下来，它们仍会重合。`,
       steady: '充稳后电流降为零，两台的电容两端都是电源电压。这个读数留下了两个解释。',
-      current: '刚接通时电容电压为零，初始电流由 5 V 除以电阻决定。这两个预测可以当场分开。',
+      current: `刚接通时电容电压保持 ${formatNum(params.initialV)} V，初始电流由 (${deltaV} V) 除以电阻决定。这两个预测可以当场分开。`,
     }[state.probe];
     heading = state.answer === state.choice ? '判断与读数相符' : '再看看另一台电路';
     body = `<p class="cx-copy">${role === 'solo' ? '你的判断' : '全班的判断'}是「${selected}」。把同一次测量放到两台候选电路上：</p>
       <table class="cx-table"><thead><tr><th>候选故障</th><th>预测读数</th><th>符合实测</th></tr></thead>
-      <tbody>${diagnoses.slice(0, 2).map(item => `<tr><th>${item.label}</th><td>${rcReading(item.id, state.probe).toFixed(2)} ${unit}</td><td>${state.compatible.includes(item.id) ? '符合' : '排除'}</td></tr>`).join('')}</tbody></table>
+      <tbody>${diagnoses.slice(0, 2).map(item => `<tr><th>${item.label}</th><td>${rcReading(item.id, state.probe, params).toFixed(2)} ${unit}</td><td>${state.compatible.includes(item.id) ? '符合' : '排除'}</td></tr>`).join('')}</tbody></table>
       <p class="cx-copy">${why}</p>${operate ? primary('reset', '换一台电路') : ''}`;
   }
   return rcCircuit(state) + `<section class="cx-controls"><h3 tabindex="-1">${heading}</h3>${body}</section>`;
+}
+
+function blackboxInstrument(state) {
+  const probed = state.probe !== undefined;
+  return `<figure class="cx-instrument">
+    <figcaption><span>数字黑箱实验台</span><span>已知：0 → 0，2 → 4</span></figcaption>
+    <div class="cx-blackbox-stage" aria-label="数字黑箱输入输出面板">
+      <div class="cx-bb-seeds">
+        <div><span>初始样例 1</span><strong>0 → 0</strong></div>
+        <div><span>初始样例 2</span><strong>2 → 4</strong></div>
+      </div>
+      <div class="cx-bb-flow">
+        <div class="cx-bb-port"><span>输入 x</span><strong>${probed ? formatSigned(state.probe) : '待选'}</strong></div>
+        <div class="cx-bb-box"><b>黑箱规则</b><small>x² 或 2x</small></div>
+        <div class="cx-bb-port cx-bb-port--out"><span>输出 y</span><strong>${probed ? formatSigned(state.reading) : '—'}</strong></div>
+      </div>
+    </div>
+    <div class="cx-meter"><span>${probed ? `本轮测试：x = ${formatSigned(state.probe)}` : '单次测试机会'}</span><strong>${probed ? `y = ${formatSigned(state.reading)}` : '待投输入'}</strong></div>
+  </figure>`;
+}
+
+function blackboxBody(state, role) {
+  const operate = canOperate(role);
+  let heading, body;
+  if (state.step === 'probe') {
+    heading = '向黑箱投入哪个数字？';
+    body = choices(blackboxInputs, 'probe', state, role) + ballotHint(role);
+  } else if (state.step === 'diagnose') {
+    heading = '这个输出支持哪条规则？';
+    body = choices(blackboxDiagnoses, 'diagnose', state, role) + ballotHint(role);
+  } else {
+    const selected = blackboxDiagnoses.find(item => item.id === state.choice)?.label ?? '';
+    const indistinguishable = state.compatible.length > 1;
+    const why = indistinguishable
+      ? `当 x = ${formatSigned(state.probe)} 时，x² 和 2x 都输出 ${formatSigned(state.reading)}，这个点落在两条规则的重合处，无法区分。`
+      : `当 x = ${formatSigned(state.probe)} 时，x² 预测 ${formatSigned(blackboxReading('square', state.probe))}，2x 预测 ${formatSigned(blackboxReading('double', state.probe))}，一次实验即可证伪另一条规则。`;
+    heading = state.answer === state.choice ? '判断与观测相符' : '再对照两条规则的预测';
+    body = `<p class="cx-copy">${role === 'solo' ? '你的判断' : '全班的判断'}是「${selected}」。把 x = ${formatSigned(state.probe)} 代入两条候选规则：</p>
+      <table class="cx-table"><thead><tr><th>候选规则</th><th>预测输出</th><th>符合实测</th></tr></thead>
+      <tbody>${blackboxDiagnoses.slice(0, 2).map(item => `<tr><th>${item.label}</th><td>${formatSigned(blackboxReading(item.id, state.probe))}</td><td>${state.compatible.includes(item.id) ? '符合' : '排除'}</td></tr>`).join('')}</tbody></table>
+      <p class="cx-copy">${why}</p>${operate ? primary('reset', '换一个黑箱') : ''}`;
+  }
+  return blackboxInstrument(state) + `<section class="cx-controls"><h3 tabindex="-1">${heading}</h3>${body}</section>`;
 }
 
 function graph(state, editable) {
@@ -207,7 +266,8 @@ function enableDrawing(root, target) {
 
 function sameBallot(prior, state) {
   if (state.peer?.choice !== prior.peer?.choice || state.peer?.reason !== prior.peer?.reason) return false;
-  if (state.step === 'measure') return true;
+  if (state.kind === 'rc' && JSON.stringify(state.params ?? null) !== JSON.stringify(prior.params ?? null)) return false;
+  if (state.step === 'measure' || state.step === 'probe') return true;
   if (state.step === 'diagnose') return state.probe === prior.probe && state.reading === prior.reading;
   if (state.step !== 'blind') return false;
   return state.target.length === prior.target.length &&
@@ -250,11 +310,17 @@ export function renderChallenge(root, state, {role = 'solo', turn = 0, action, v
   }
   const previousButton = root.contains(document.activeElement) ? document.activeElement.dataset : null;
   const draft = editable ? [...state.target] : null;
-  const rc = state.kind === 'rc';
-  const note = rc ? '电阻或电容有一个变成了标称值的两倍。电容从 0 V 开始充电，全班只有一次测量机会。' :
-    '你决定想要的光强。机器用三个点搭一台干涉仪，再由你挑一个没给过它的点验收。';
-  root.innerHTML = `<article class="cx-shell"><header class="cx-heading"><h2>${challengeNames[state.kind]}</h2><p>${note}</p></header>
-    <div class="cx-grid-layout">${rc ? rcBody(state, role) : opticalBody(state, role)}</div></article>`;
+  const rcParams = state.kind === 'rc' ? normalizeRcParams(state.params) : null;
+  const note = state.kind === 'rc'
+    ? `电阻或电容有一个变成了标称值的两倍。电容从 ${formatNum(rcParams.initialV)} V 开始充电，全班只有一次测量机会。`
+    : state.kind === 'blackbox'
+      ? '黑箱内置 x² 或 2x，已知 0→0、2→4。全班只投一个输入数字，看看能否当场区分两条规则。'
+      : '你决定想要的光强。机器用三个点搭一台干涉仪，再由你挑一个没给过它的点验收。';
+  const body = state.kind === 'rc' ? rcBody(state, role)
+    : state.kind === 'blackbox' ? blackboxBody(state, role)
+    : opticalBody(state, role);
+  root.innerHTML = `<article class="cx-shell"><header class="cx-heading"><h2>${challengeNames[state.kind] ?? '课堂实验'}</h2><p>${note}</p></header>
+    <div class="cx-grid-layout">${body}</div></article>`;
   const ballots = Array.from(root.querySelectorAll('[data-cx-count]'), label => {
     const id = label.dataset.cxCount;
     const button = role === 'student' ? label.closest('button') : null;
@@ -269,7 +335,7 @@ export function renderChallenge(root, state, {role = 'solo', turn = 0, action, v
     note.className='cx-peer';
     const label=document.createElement('strong');
     const words=document.createElement('p');
-    label.textContent='AI 同桌选了「'+options.find(item=>item.id===state.peer.choice).label+'」';
+    label.textContent='AI 同桌选了「'+(options.find(item=>item.id===state.peer.choice)?.label ?? state.peer.choice)+'」';
     words.textContent=state.peer.reason;
     note.append(label,words);
     root.querySelector('.cx-controls').append(note);

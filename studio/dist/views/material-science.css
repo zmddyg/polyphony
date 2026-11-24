@@ -227,6 +227,13 @@
 }
 .psci-legend i.psci-dash { border-top-style: dashed; }
 
+.psci-formulas { display: grid; gap: 8px; margin-top: 8px; }
+.psci-formula-block {
+  padding: 10px 13px; border: 1px solid #d5dff4; border-radius: 9px;
+  background: #f6f9ff; color: #162447; font-size: 1.05rem; overflow-x: auto;
+}
+.psci-formula-block math { display: block; margin-inline: auto; }
+
 @container (max-width: 360px) {
   .psci-check-list > div { grid-template-columns: minmax(0, 1fr) auto; }
   .psci-check-list dd:first-of-type { grid-row: 2; grid-column: 1 / -1; }

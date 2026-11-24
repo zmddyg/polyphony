@@ -1,4 +1,5 @@
 import { mziPowerA, phaseLabel } from './optics.mjs';
+import { mziFormulaMathML, rcFormulaMathML } from './mathml.mjs';
 
 const rcFields = [
   { key: 'resistanceKohm', label: '电阻 R', unit: 'kΩ', value: 10 },
@@ -125,6 +126,7 @@ function rcExample(parameters) {
   const tau = number(tauMs);
   const sample = timeOverTau => number(rcVoltage(initialV, finalV, timeOverTau));
   const formula = `V_C(t) = [${final} + (${initial} − ${finalV < 0 ? `(${final})` : final}) × exp(−t/(${tau} ms))] V`;
+  const formulas = [rcFormulaMathML({ initial, final, finalNegative: finalV < 0, tau })];
   const points = Array.from({ length: 51 }, (_, index) => {
     const ratio = index / 10;
     return { x: ratio * tauMs, y: rcVoltage(initialV, finalV, ratio) };
@@ -148,6 +150,7 @@ function rcExample(parameters) {
           `${formula}，t ≥ 0。`,
           `代入 t = τ = ${tau} ms，V_C(τ) ≈ ${sample(1)} V。`,
         ],
+        formulas,
       },
       {
         title: '一阶 RC 电路 · 数值曲线',
@@ -190,6 +193,7 @@ function mziExample({ phaseDeg }) {
           `${formula}。`,
           `代入后，A 端输出 ${percent(a)}，B 端输出 ${percent(b)}。两端功率之和等于入射功率。`,
         ],
+        formulas: [mziFormulaMathML()],
       },
       {
         title: '马赫–曾德尔干涉 · 数值曲线',

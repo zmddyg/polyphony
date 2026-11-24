@@ -2,6 +2,9 @@ node_modules/
 __pycache__/
 .env
 .env.*
+!.env.example
 .polyphony-rooms.json*
+.polyphony-rooms.db*
+.polyphony-rooms.sqlite*
 .DS_Store
 Thumbs.db

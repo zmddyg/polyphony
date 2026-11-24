@@ -254,6 +254,7 @@ function workshopEditor(score, e, icon) {
     <h3>还没有课谱</h3><p>填写备课材料并编排课谱，或导入已有的课谱。</p>
     <ol aria-label="课堂作答流程">${stages.map(stage => `<li>${icon(stage.icon, 16)}${stage.title}</li>`).join('')}</ol>
   </div>`;
+  const materialsMap = new Map((score.materials ?? []).map(item => [item.id, item.text]));
   return `<form class="pw-score" id="pw-score">
     <div class="pw-score-heading-fields">
       <label>课题名称<input data-score="title" value="${e(score.title)}" maxlength="100" required></label>
@@ -262,7 +263,11 @@ function workshopEditor(score, e, icon) {
     <label>学习目标<input data-score="description" value="${e(score.description)}" maxlength="500"></label>
     <fieldset><legend>初次作答</legend>
       <label>题目与材料<textarea data-score="prompt" rows="5" maxlength="2500" required>${e(score.prompt)}</textarea></label>
-      <div class="pw-option-fields">${score.options.map((option, index) => `<label><span class="pw-option-index" aria-hidden="true">${String.fromCharCode(65 + index)}</span><span class="visually-hidden">选项 ${String.fromCharCode(65 + index)}</span><input data-option="${index}" value="${e(option.label)}" maxlength="240" required></label>`).join('')}</div>
+      <div class="pw-option-fields">${score.options.map((option, index) => `<div class="pw-option-row">
+        <label><span class="pw-option-index" aria-hidden="true">${String.fromCharCode(65 + index)}</span><span class="visually-hidden">选项 ${String.fromCharCode(65 + index)}</span><input data-option="${index}" value="${e(option.label)}" maxlength="240" required></label>
+        ${score.options.length > 2 ? `<button type="button" class="pw-icon-button pw-remove-item" data-remove-option="${index}" aria-label="删除选项 ${String.fromCharCode(65 + index)}" title="删除选项">${icon('close', 15)}</button>` : ''}
+      </div>`).join('')}</div>
+      ${score.options.length < 6 ? `<button type="button" class="pw-text-button pw-add-item" data-add-option>${icon('plus', 15)}添加选项（当前 ${score.options.length}/6）</button>` : ''}
     </fieldset>
     <fieldset><legend>教学分支</legend>${score.branches.map((branch, index) => `<details class="pw-branch" ${index === 0 ? 'open' : ''}>
       <summary><span class="pw-branch-index" aria-hidden="true">${index + 1}</span><span data-branch-label="${index}">${e(branch.title) || '分支 ' + (index + 1)}</span>${icon('chevron-down', 16)}</summary>
@@ -270,8 +275,12 @@ function workshopEditor(score, e, icon) {
         <label>分支标题<input data-branch="${index}" data-field="title" value="${e(branch.title)}" maxlength="120" required></label>
         <label>学生任务<textarea data-branch="${index}" data-field="description" rows="2" maxlength="700" required>${e(branch.description)}</textarea></label>
         <label>二次作答题目<span class="pw-field-note">留空时使用初答题目并提示学生结合新证据作答</span><textarea data-branch="${index}" data-field="revisionPrompt" rows="2" maxlength="700">${e(branch.revisionPrompt ?? '')}</textarea></label>
+        ${branch.evidenceIds?.length ? `<div class="pw-branch-evidence"><span>关联材料：</span>${branch.evidenceIds.map(id => `<code title="${e(materialsMap.get(id) ?? id)}">${e(id)}</code>`).join(' ')}</div>` : ''}
+        ${score.branches.length > 1 ? `<div class="pw-branch-footer"><button type="button" class="pw-text-button pw-danger-text" data-remove-branch="${index}">${icon('close', 14)}删除此分支</button></div>` : ''}
       </div>
-    </details>`).join('')}</fieldset>
+    </details>`).join('')}
+    ${score.branches.length < 5 ? `<button type="button" class="pw-text-button pw-add-item" data-add-branch>${icon('plus', 15)}添加教学分支（当前 ${score.branches.length}/5）</button>` : ''}
+    </fieldset>
   </form>`;
 }
 
@@ -498,6 +507,42 @@ function paintWorkshop(root, ctx, state) {
     }
     queueSave(state);
   };
+  const markEdited = () => {
+    if (draft.trace && !draft.edited) draft.edited = true;
+    persist(state);
+  };
+  editor.querySelector('[data-add-option]')?.addEventListener('click', () => {
+    if (state.operation || draft.score.options.length >= 6) return;
+    const id = 'opt-' + (draft.score.options.length + 1) + '-' + Date.now().toString(36).slice(-4);
+    draft.score.options.push({ id, label: '' });
+    markEdited();
+    refreshWorkshop(state, `[data-option="${draft.score.options.length - 1}"]`, '已添加新选项。');
+  });
+  editor.querySelectorAll('[data-remove-option]').forEach(button => {
+    button.onclick = () => {
+      if (state.operation || draft.score.options.length <= 2) return;
+      const idx = Number(button.dataset.removeOption);
+      draft.score.options.splice(idx, 1);
+      markEdited();
+      refreshWorkshop(state, `[data-option="${Math.max(0, idx - 1)}"]`, '已删除选项。');
+    };
+  });
+  editor.querySelector('[data-add-branch]')?.addEventListener('click', () => {
+    if (state.operation || draft.score.branches.length >= 5) return;
+    const id = 'branch-' + (draft.score.branches.length + 1) + '-' + Date.now().toString(36).slice(-4);
+    draft.score.branches.push({ id, title: '', description: '', revisionPrompt: '' });
+    markEdited();
+    refreshWorkshop(state, `[data-branch="${draft.score.branches.length - 1}"][data-field="title"]`, '已添加教学分支。');
+  });
+  editor.querySelectorAll('[data-remove-branch]').forEach(button => {
+    button.onclick = () => {
+      if (state.operation || draft.score.branches.length <= 1) return;
+      const idx = Number(button.dataset.removeBranch);
+      draft.score.branches.splice(idx, 1);
+      markEdited();
+      refreshWorkshop(state, '[data-score="title"]', '已删除教学分支。');
+    };
+  });
   editor.onsubmit = event => {
     event.preventDefault();
     const fields = [score.title, score.prompt, ...score.options.map(option => option.label),

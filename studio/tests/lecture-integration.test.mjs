@@ -69,7 +69,7 @@ test('HTTP and SSE carry an imported binary PPT through teaching, answering, ret
       assert.deepEqual(JSON.parse(options.body).state.pages, pages);
       return Response.json({model:'jev-test', usage:{input_tokens:30,output_tokens:10},
         answers:{page_1:{type:'choice',choice:'mzi',confidence:0.96,
-          probabilities:{rc:0.01,mzi:0.96,history:0.01,blackbox:0.01,none:0.01}}}});
+          probabilities:{rc:0.01,mzi:0.95,history:0.01,blackbox:0.01,inquiry:0.01,none:0.01}}}});
     });
     assert.equal((await http(prep+'/lecture-plan', {pages})).status, 403);
     const planned = await http(prep+'/lecture-plan', {pages}, prepCookie);

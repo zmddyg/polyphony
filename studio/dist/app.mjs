@@ -32,7 +32,9 @@ function toast(message) {
 
 function localize(error) {
   const detail = error?.message || String(error);
-  if (/teacher desk|teacher session|teacher credential|teacher access/i.test(detail)) return '请回到创建这间课堂的浏览器打开教师台。';
+  if (/passphrase|口令/i.test(detail)) return '需要输入教师口令才能创建课堂或执行此操作。';
+  if (/pairing token|配对/i.test(detail)) return '遥控配对链接已失效或已被使用，请在讲台电脑上重新生成。';
+  if (/teacher desk|teacher session|teacher credential|teacher access/i.test(detail)) return '请回到创建这间课堂的浏览器打开教师台，或在讲台电脑上使用「手机遥控」扫码接管。';
   if (/unavailable in this browser/i.test(detail)) return '这个浏览器里没有这间排练室，请从创建课堂的同一浏览器打开。';
   if (/valid six|room code/i.test(detail)) return '请输入六位课堂码。';
   if (/room not found|unknown room|no such room/i.test(detail)) return '没有找到这间课堂，请核对课堂码或重新打开邀请链接。';
@@ -49,7 +51,7 @@ function remember() {
   const {code,lesson,phase,demo} = session.state;
   const entry = {code,title:session.state.lecture?.title||lesson.title,phase,demo,mode:session.mode,at:Date.now()};
   const records = recentRooms();
-  if (records[0]?.code === code && records[0].phase === phase && records[0].title === lesson.title &&
+  if (records[0]?.code === code && records[0].phase === phase && records[0].title === entry.title &&
       records[0].mode === entry.mode && records[0].demo === demo) return;
   writeStorage('polyphony.recent.v1',[entry,...records.filter(item => item.code !== code)].slice(0,16));
 }
@@ -200,6 +202,108 @@ function invite() {
   dialog.querySelector('[data-copy-code]').onclick = () => copyWithFeedback(code, '课堂码');
   dialog.querySelector('[data-copy-link]')?.addEventListener('click', () => copyWithFeedback(url, '学生链接'));
   dialog.querySelector('[data-open-student]')?.addEventListener('click', () => openSurface('student'));
+}
+
+function confirmDialog({ title = '确认操作', message = '', confirmLabel = '确认', cancelLabel = '取消', danger = false } = {}) {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      closeModal();
+      resolve(value);
+    };
+    const dialog = modal(title, `
+      <p class="dialog-intro">${esc(message)}</p>
+      <div class="dialog-actions">
+        <button type="button" class="plain-button" data-confirm-no>${esc(cancelLabel)}</button>
+        <button type="button" class="${danger ? 'action-danger' : 'action-primary'}" data-confirm-yes>${esc(confirmLabel)}</button>
+      </div>`);
+    dialog.addEventListener('close', () => { if (!settled) { settled = true; resolve(false); } });
+    dialog.querySelector('[data-confirm-no]').onclick = () => finish(false);
+    dialog.querySelector('[data-confirm-yes]').onclick = () => finish(true);
+    dialog.querySelector('[data-confirm-no]').focus();
+  });
+}
+
+async function remotePair() {
+  if (!session || session.mode !== 'server' || typeof session.createRemotePair !== 'function') {
+    toast('当前为本地浏览器排练模式，需在联机课堂服务下使用手机遥控。');
+    return;
+  }
+  const dialog = modal('手机遥控配对', `
+    <p class="dialog-intro">用手机或平板扫码即可接管当前课堂的翻页、互动与讲台控制。配对码仅可使用一次，5 分钟内有效。</p>
+    <div class="invite-layout">
+      <div id="room-qr" class="room-qr" role="img" aria-label="教师遥控配对二维码"></div>
+      <div>
+        <span class="field-caption">有效倒计时</span>
+        <div class="invite-code" data-pair-timer>05:00</div>
+        <button type="button" class="text-button" data-pair-refresh>${icon('replay', 14)}重新生成</button>
+      </div>
+    </div>
+    <label class="field-caption" for="pair-link">遥控链接（一次性，请勿发给学生）</label>
+    <div class="input-line">
+      <input id="pair-link" readonly value="正在生成配对链接…">
+      <button type="button" class="plain-button" data-copy-pair disabled>复制链接</button>
+    </div>
+    <p class="dialog-feedback" data-pair-status role="status"></p>`);
+  const linkInput = dialog.querySelector('#pair-link');
+  const copyBtn = dialog.querySelector('[data-copy-pair]');
+  const timerEl = dialog.querySelector('[data-pair-timer]');
+  const statusEl = dialog.querySelector('[data-pair-status]');
+  const refreshBtn = dialog.querySelector('[data-pair-refresh]');
+  let countdown;
+  let activeUrl = '';
+
+  const stopTimer = () => { if (countdown) { clearInterval(countdown); countdown = undefined; } };
+  dialog.addEventListener('close', stopTimer);
+
+  async function generate() {
+    stopTimer();
+    refreshBtn.disabled = true;
+    copyBtn.disabled = true;
+    statusEl.dataset.kind = 'pending';
+    statusEl.textContent = '正在生成一次性配对二维码…';
+    try {
+      const pair = await session.createRemotePair();
+      if (!dialog.isConnected) return;
+      activeUrl = pair.url;
+      linkInput.value = activeUrl;
+      copyBtn.disabled = false;
+      statusEl.textContent = '';
+      void renderInviteCode(dialog, activeUrl);
+      const tick = () => {
+        if (!dialog.isConnected) return stopTimer();
+        const remaining = Math.max(0, Math.ceil((pair.expiresAt - Date.now()) / 1000));
+        const mm = String(Math.floor(remaining / 60)).padStart(2, '0');
+        const ss = String(remaining % 60).padStart(2, '0');
+        timerEl.textContent = `${mm}:${ss}`;
+        if (remaining <= 0) {
+          stopTimer();
+          statusEl.dataset.kind = 'error';
+          statusEl.textContent = '配对码已过期，请点击「重新生成」。';
+        }
+      };
+      tick();
+      countdown = setInterval(tick, 1000);
+    } catch (error) {
+      if (!dialog.isConnected) return;
+      statusEl.dataset.kind = 'error';
+      statusEl.textContent = localize(error);
+      linkInput.value = '';
+    } finally {
+      if (dialog.isConnected) refreshBtn.disabled = false;
+    }
+  }
+
+  copyBtn.onclick = async () => {
+    if (!activeUrl) return;
+    const copied = await copy(activeUrl);
+    statusEl.dataset.kind = copied ? 'success' : 'error';
+    statusEl.textContent = copied ? '已复制遥控链接，请在教师手机打开' : '请选中链接手动复制。';
+  };
+  refreshBtn.onclick = () => { void generate(); };
+  void generate();
 }
 
 const phaseText = {collect:'收集中',reveal:'结果已公布',branch:'分支讨论',closed:'已结课'};
@@ -421,9 +525,13 @@ async function startLecture(lecture) {
 
 function context() {
   const active=session, snapshot=active.state;
-  return {state:snapshot,mode:active.mode,connected:active.connected,participantId:active.participantId,tab:labTab,esc,icon,toast,go,invite,open:openSurface,url:v=>active.url(v),
+  return {state:snapshot,mode:active.mode,connected:active.connected,participantId:active.participantId,tab:labTab,esc,icon,toast,go,invite,
+    remotePair:active.mode === 'server' ? remotePair : null,
+    confirmDialog,
+    open:openSurface,url:v=>active.url(v),
     askPeer:active.assistedComposition && snapshot.lecture ? ()=>active.askPeer(snapshot.lecture.index,snapshot.lecture.turn) : null,
     startLecture,startLesson,getState:()=>active.state,getRoomState:()=>active.state,getFrame:index=>active.getFrame(index),
+    getOutline:()=>active.getOutline ? active.getOutline() : Promise.resolve([]),
     materialRendering:!!active.materialRendering,
     importMaterial:file=>active.importMaterial(file),planLecture:material=>active.planLecture(material),
     modelAvailable:!!active.assistedComposition,aiOutputMode:active.aiOutputMode,compose:input=>active.compose(input),
@@ -565,10 +673,14 @@ function activate(next,v,replace=false) {
   });
 }
 
+let teacherPassphrase = '';
+try { teacherPassphrase = sessionStorage.getItem('polyphony.passphrase') || ''; } catch { /* ignore */ }
+
 function errorPage(message, code) {
   setRail(false, false);
   document.body.classList.remove('standalone');
   const role = roleFor(view);
+  const needsPassphrase = role === 'teacher' && /口令|passphrase/i.test(message || '');
   const entry = {
     teacher: { kind:'教师端', symbol:'desk', title:'打开教师工作区', hint:'请使用创建课堂时的浏览器来重新连接。', action:'打开工作区' },
     stage: { kind:'投影端', symbol:'monitor', title:'连接投影大屏', hint:'输入教师提供的课堂码，将课堂画面投到大屏。', action:'连接投影' },
@@ -579,19 +691,28 @@ function errorPage(message, code) {
     '<div class="shell-entry-top"><div class="shell-brand">'+brand+'</div><span class="shell-entry-role">'+icon(entry.symbol,15)+entry.kind+'</span></div>'+
     '<h1 id="shell-entry-title">'+entry.title+'</h1><p class="shell-entry-hint">'+entry.hint+'</p>'+
     (message ? '<p class="shell-entry-error" role="alert">'+esc(message)+'</p>' : '')+
-    '<form id="entry-form"><label for="room-input">六位课堂码</label><input class="shell-entry-code" id="room-input" name="room" maxlength="6" minlength="6" pattern="[0-9A-Za-z]{6}" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC123" required value="'+esc(code || '')+'">'+
+    '<form id="entry-form"><label for="room-input">六位课堂码</label><input class="shell-entry-code" id="room-input" name="room" maxlength="6" minlength="6" pattern="[0-9A-Za-z]{6}" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC123" '+(needsPassphrase?'':'required ')+'value="'+esc(code || '')+'">'+
+    (needsPassphrase ? '<label for="passphrase-input">教师口令</label><input class="shell-entry-passphrase" id="passphrase-input" name="passphrase" type="password" autocomplete="current-password" placeholder="输入服务端配置的教师口令" value="'+esc(teacherPassphrase)+'" required>' : '')+
     '<button type="submit" class="action-primary shell-entry-submit"><span>'+entry.action+'</span>'+icon('arrow-right',17)+'</button></form>'+
     (role === 'teacher' ? '<div class="shell-entry-recovery">'+
         (recent ? '<button type="button" class="plain-button" data-entry-recent><span>返回上次课堂</span></button>' : '')+
         '<button type="button" class="text-button shell-entry-reset"><span>创建新的排练室</span></button></div>' : '')+'</div></main>';
   const form = app.querySelector('#entry-form');
   const input = form.querySelector('#room-input');
+  const passInput = form.querySelector('#passphrase-input');
   const submit = form.querySelector('[type="submit"]');
   const reset = app.querySelector('.shell-entry-reset');
   const resume = app.querySelector('[data-entry-recent]');
+  function savePassphrase() {
+    if (!passInput) return;
+    teacherPassphrase = passInput.value.trim();
+    try { sessionStorage.setItem('polyphony.passphrase', teacherPassphrase); } catch { /* ignore */ }
+  }
   function submitEntry(target, room, button, pending) {
+    savePassphrase();
     form.setAttribute('aria-busy', 'true');
     input.readOnly = true;
+    if (passInput) passInput.readOnly = true;
     submit.disabled = true;
     if (reset) reset.disabled = true;
     if (resume) resume.disabled = true;
@@ -600,14 +721,16 @@ function errorPage(message, code) {
   }
   form.onsubmit = event => {
     event.preventDefault();
-    submitEntry(view, input.value.trim().toUpperCase(), submit, '正在连接…');
+    const roomVal = input.value.trim().toUpperCase();
+    submitEntry(view, roomVal || null, submit, '正在连接…');
   };
   if (reset) reset.onclick = () => submitEntry('desk', null, reset, '正在创建…');
   if (resume) resume.onclick = () => submitEntry('desk', recent.code, resume, '正在返回…');
-  if (message) input.focus({ preventScroll:true });
+  if (needsPassphrase && passInput) passInput.focus({ preventScroll:true });
+  else if (message) input.focus({ preventScroll:true });
 }
 
-async function connect(v,code) {
+async function connect(v,code,claim=null) {
   const token=++generation;
   const role=roleFor(v);
   if (session) {
@@ -623,9 +746,10 @@ async function connect(v,code) {
   if(role!=='teacher' && !code) {view=v;errorPage('',null);return;}
   if (!Object.hasOwn(lecturePages, v)) void preparePage(pages[v]).catch(() => {});
   try {
-    const next=await openSession({role,room:code,demo:true,lessonId:'mzi'});
+    const next=await openSession({role,room:code,claim,passphrase:teacherPassphrase || undefined,demo:true,lessonId:'mzi'});
     if(token!==generation) {next.close();return;}
     activate(next,v,true);
+    if (claim) toast('已连接教师遥控权限');
   } catch(error) {if(token===generation){view=v;errorPage(localize(error),code);}}
 }
 
@@ -633,9 +757,10 @@ window.addEventListener('popstate',()=>{
   const params=new URL(location.href).searchParams;
   const v=Object.hasOwn(titles,params.get('view'))?params.get('view'):(params.has('room')?'desk':'materials');
   const code=params.get('room');
+  const claim=params.get('claim');
   labTab=params.get('tab');
-  if(session && session.code===code && roleFor(view)===roleFor(v)) {view=v;closeModal();paintShell();paintPage();}
-  else connect(v,code);
+  if(session && session.code===code && roleFor(view)===roleFor(v) && !claim) {view=v;closeModal();paintShell();paintPage();}
+  else connect(v,code,claim);
 });
 mobileShell.addEventListener('change', () => setRail(false));
 window.addEventListener('keydown', event => {
@@ -659,4 +784,5 @@ window.addEventListener('keydown', event => {
 });
 window.addEventListener('pagehide',e=>{if(!e.persisted)session?.close();});
 const requestedRoom=query.get('room') || (roleFor(view)==='teacher' ? recentRooms()[0]?.code : null);
-connect(view,requestedRoom);
+const requestedClaim=query.get('claim');
+connect(view,requestedRoom,requestedClaim);

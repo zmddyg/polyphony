@@ -4,14 +4,14 @@ import { localLecturePlan } from '../dist/core/lecture-planner.mjs';
 import { isJevConfigured, planLectureWithJev } from '../lecture-quick-provider.mjs';
 
 const credential = 'test-jev-key';
-const labels = ['rc', 'mzi', 'history', 'blackbox', 'none'];
+const labels = ['rc', 'mzi', 'history', 'blackbox', 'inquiry', 'none'];
 const page = (number, title, text) => ({ number, title, text });
 const payload = answers => ({
   model: 'jev-1.14.0', answers, usage: { input_tokens: 340, output_tokens: 67 },
 });
 const choice = (kind, confidence = 0.84) => ({
   type: 'choice', choice: kind, confidence,
-  probabilities: Object.fromEntries(labels.map(item => [item, item === kind ? 0.96 : 0.01])),
+  probabilities: Object.fromEntries(labels.map(item => [item, item === kind ? 0.95 : 0.01])),
 });
 
 test('Jev sends the documented System One request and merges only accepted original-page choices', async () => {

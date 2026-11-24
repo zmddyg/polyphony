@@ -1,14 +1,49 @@
 import { mziPowerA } from './mzi-power.mjs';
 
-export const challengeNames = { rc: '只准测一次', light: '画条曲线，考考机器' };
-export const probes = [
-  { id: 'early', label: '2 ms 时的电容电压', unit: 'V' },
-  { id: 'steady', label: '充稳后的电容电压', unit: 'V' },
-  { id: 'current', label: '刚接通时的电流', unit: 'mA' },
-];
+export const challengeNames = { rc: '只准测一次', light: '画条曲线，考考机器', blackbox: '数字黑箱挑战' };
+export const rcDefaults = Object.freeze({ resistanceKohm: 10, capacitanceNf: 100, initialV: 0, finalV: 5 });
+
+export function normalizeRcParams(input) {
+  const resistanceKohm = Number(input?.resistanceKohm);
+  const capacitanceNf = Number(input?.capacitanceNf);
+  const initialV = Number(input?.initialV);
+  const finalV = Number(input?.finalV);
+  const validR = Number.isFinite(resistanceKohm) && resistanceKohm > 0;
+  const validC = Number.isFinite(capacitanceNf) && capacitanceNf > 0;
+  const validV = Number.isFinite(initialV) && Number.isFinite(finalV) && initialV !== finalV;
+  const r = validR ? resistanceKohm : rcDefaults.resistanceKohm;
+  const c = validC ? capacitanceNf : rcDefaults.capacitanceNf;
+  const v0 = validV ? initialV : rcDefaults.initialV;
+  const vInf = validV ? finalV : rcDefaults.finalV;
+  return { resistanceKohm: r, capacitanceNf: c, initialV: v0, finalV: vInf };
+}
+
+function formatNum(value) {
+  return Number.isFinite(value) ? String(Number(value.toPrecision(4))) : '—';
+}
+
+export function rcProbes(params) {
+  const { resistanceKohm, capacitanceNf } = normalizeRcParams(params);
+  const probeMs = 2 * resistanceKohm * capacitanceNf / 1e3;
+  return [
+    { id: 'early', label: `${formatNum(probeMs)} ms 时的电容电压`, unit: 'V' },
+    { id: 'steady', label: '充稳后的电容电压', unit: 'V' },
+    { id: 'current', label: '刚接通时的电流', unit: 'mA' },
+  ];
+}
+
+export const probes = rcProbes(rcDefaults);
 export const diagnoses = [
   { id: 'r', label: '电阻翻倍' }, { id: 'c', label: '电容翻倍' },
   { id: 'open', label: '两种故障都说得通' },
+];
+export const blackboxInputs = [-2, -1, 0, 1, 2, 3, 4].map(x => ({
+  id: String(x), label: `输入 ${x < 0 ? '−' + Math.abs(x) : x}`, value: x,
+}));
+export const blackboxDiagnoses = [
+  { id: 'square', label: '平方规则 x²' },
+  { id: 'double', label: '倍增规则 2x' },
+  { id: 'open', label: '两条规则仍都说得通' },
 ];
 export const angularStep = 15;
 export const pointCount = 360 / angularStep;
@@ -18,12 +53,19 @@ const radians = degrees => degrees * Math.PI / 180;
 const withinUnit = value => Math.min(1, Math.max(0, value));
 const rms = (sum, count) => Math.sqrt(sum / count);
 
-export function rcReading(fault, probe) {
-  const resistance = fault === 'r' ? 20000 : 10000;
-  const capacitance = fault === 'c' ? 200e-9 : 100e-9;
-  if (probe === 'current') return 5000 / resistance;
-  if (probe === 'steady') return 5;
-  return 5 * -Math.expm1(-.002 / (resistance * capacitance));
+export function rcReading(fault, probe, params) {
+  const { resistanceKohm, capacitanceNf, initialV, finalV } = normalizeRcParams(params);
+  const resistance = (fault === 'r' ? 2 : 1) * resistanceKohm * 1000;
+  const capacitance = (fault === 'c' ? 2 : 1) * capacitanceNf * 1e-9;
+  const nominalTau = resistanceKohm * 1000 * capacitanceNf * 1e-9;
+  const probeTime = 2 * nominalTau;
+  if (probe === 'current') return ((finalV - initialV) * 1000) / resistance;
+  if (probe === 'steady') return finalV;
+  return initialV + (finalV - initialV) * -Math.expm1(-probeTime / (resistance * capacitance));
+}
+
+export function blackboxReading(rule, x) {
+  return rule === 'square' ? x * x : 2 * x;
 }
 
 export function presetTarget(kind = 'double') {
@@ -70,14 +112,24 @@ export function fullCurveRms(model, target) {
   return rms(target.reduce((sum, value, i) => sum + (lightAt(model, i * angularStep) - value) ** 2, 0), target.length);
 }
 
-export function newChallenge(kind) {
-  if (kind === 'rc') return {kind, step: 'measure', fault: Math.random() < .5 ? 'r' : 'c', votes: []};
-  if (kind === 'light') return {kind, step: 'draw', target: presetTarget(), votes: []};
+export function newChallenge(kind, { random, params } = {}) {
+  const coin = Number.isFinite(random) ? random : Math.random();
+  if (kind === 'rc') {
+    const custom = params ? normalizeRcParams(params) : null;
+    return { kind, step: 'measure', fault: coin < .5 ? 'r' : 'c', votes: [], ...(custom && { params: custom }) };
+  }
+  if (kind === 'light') return { kind, step: 'draw', target: presetTarget(), votes: [] };
+  if (kind === 'blackbox') return { kind, step: 'probe', fault: coin < .5 ? 'square' : 'double', votes: [] };
   throw new Error('找不到这项实验。');
 }
 
 export function voteChoices(state) {
-  if (state.step === 'measure') return probes;
+  if (state.kind === 'blackbox') {
+    if (state.step === 'probe') return blackboxInputs.map(({ id, label }) => ({ id, label }));
+    if (state.step === 'diagnose') return blackboxDiagnoses;
+    return [];
+  }
+  if (state.step === 'measure') return rcProbes(state.params);
   if (state.step === 'diagnose') return diagnoses;
   if (state.step === 'blind') return blindAngles.map(angle => ({id: String(angle), label: angle + '°'}));
   return [];
@@ -98,16 +150,27 @@ export function publicChallenge(state, participantId) {
   return {...visible, counts, myVote: votes.find(vote => vote.id === participantId)?.choice ?? null};
 }
 
-export function advanceChallenge(state, {action, value, target} = {}) {
+export function advanceChallenge(state, {action, value, target, random} = {}) {
   const next = patch => ({...state, ...patch, peer: null, votes: []});
-  if (action === 'reset' && ['solved', 'refit', 'tested'].includes(state.step)) return newChallenge(state.kind);
-  if (state.step === 'measure' && action === 'measure' && probes.some(probe => probe.id === value)) {
-    return next({step: 'diagnose', probe: value, reading: rcReading(state.fault, value)});
+  if (action === 'reset' && ['solved', 'refit', 'tested'].includes(state.step)) {
+    return newChallenge(state.kind, { random, params: state.params });
   }
-  if (state.step === 'diagnose' && action === 'diagnose' && diagnoses.some(item => item.id === value)) {
-    const compatible = ['r', 'c'].filter(fault => Math.abs(rcReading(fault, state.probe) - state.reading) < 1e-9);
+  if (state.kind === 'rc' && state.step === 'measure' && action === 'measure' && probes.some(probe => probe.id === value)) {
+    return next({step: 'diagnose', probe: value, reading: rcReading(state.fault, value, state.params)});
+  }
+  if (state.kind === 'rc' && state.step === 'diagnose' && action === 'diagnose' && diagnoses.some(item => item.id === value)) {
+    const compatible = ['r', 'c'].filter(fault => Math.abs(rcReading(fault, state.probe, state.params) - state.reading) < 1e-9);
     const answer = compatible.length === 1 ? compatible[0] : 'open';
     return next({step: 'solved', choice: value, compatible, answer});
+  }
+  if (state.kind === 'blackbox' && state.step === 'probe' && action === 'probe' && blackboxInputs.some(item => item.id === String(value))) {
+    const input = Number(value);
+    return next({ step: 'diagnose', probe: String(input), input, reading: blackboxReading(state.fault, input) });
+  }
+  if (state.kind === 'blackbox' && state.step === 'diagnose' && action === 'diagnose' && blackboxDiagnoses.some(item => item.id === value)) {
+    const compatible = ['square', 'double'].filter(rule => blackboxReading(rule, state.input) === state.reading);
+    const answer = compatible.length === 1 ? compatible[0] : 'open';
+    return next({ step: 'solved', choice: value, compatible, answer });
   }
   if (state.step === 'draw' && action === 'fit') {
     if (!Array.isArray(target) || target.length !== pointCount ||

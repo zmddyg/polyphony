@@ -175,6 +175,41 @@
 .mw-memory[open] > summary::after { content: '−'; }
 .mw-memory > div { padding: 0 14px 14px; }
 
+.mw-workspace.is-dragover .mw-empty,
+.mw-workspace.is-dragover .mw-paper {
+  border-color: var(--mw-accent);
+  box-shadow: 0 0 0 3px #315be830;
+  background: #f4f7ff;
+}
+.mw-formulas { display: grid; gap: 8px; }
+.mw-formula {
+  padding: 10px 14px; border: 1px solid #d7e2f8; border-radius: 9px;
+  background: #f6f9ff; color: #162447; font-size: 1.08rem; overflow-x: auto;
+}
+.mw-exp-options { display: grid; gap: 8px; }
+.mw-exp-card {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 10px;
+  padding: 11px 12px; border: 1px solid #d5dff2; border-radius: 10px; background: #fbfdff; cursor: pointer; font-weight: 450;
+}
+.mw-exp-card:has(input:checked) { border-color: #7c9cf8; background: #eef3ff; }
+.mw-exp-card input { width: 16px; height: 16px; margin-top: 3px; accent-color: var(--mw-accent); }
+.mw-exp-card strong { display: block; font-size: 15px; color: var(--ink); }
+.mw-exp-card p { margin: 4px 0 0; font-size: 13px; color: var(--mw-muted); line-height: 1.5; }
+.mw-exp-rc-note { padding: 9px 12px; border-radius: 8px; background: #eef5f4; color: #16594f; font-size: 13px; line-height: 1.5; }
+.mw-manage-dialog { width: min(640px, calc(100% - 28px)); }
+.mw-manage-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.mw-manage-head h2 { margin: 0; font-size: 21px; }
+.mw-manage-top-actions { margin: 12px 0 14px; }
+.mw-version-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; max-height: 46vh; overflow-y: auto; }
+.mw-version-cards li {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  padding: 10px 12px; border: 1px solid #dfe6f4; border-radius: 10px; background: #f8faff;
+}
+.mw-version-info { min-width: 0; display: grid; gap: 3px; }
+.mw-version-info strong { font-size: 14px; overflow-wrap: anywhere; }
+.mw-version-info small { font-size: 12px; color: var(--mw-muted); }
+.mw-workspace .mw-danger-plain { color: #a53030; }
+
 @media (max-width: 850px) {
   .mw-layout { grid-template-columns: minmax(0, 1fr); gap: 11px; }
   .mw-pages { position: static; }
