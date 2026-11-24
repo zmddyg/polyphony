@@ -19,6 +19,15 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Verify Python helper syntax
         run: python3 -m py_compile studio/tools/material-import-*.py
+      - name: Enable real PDF and PowerPoint import tests
+        if: matrix.node == 24
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libreoffice-impress python3-uno
+          python3 -m venv "$RUNNER_TEMP/polyphony-pdf"
+          "$RUNNER_TEMP/polyphony-pdf/bin/python" -m pip install 'PyMuPDF>=1.24,<2'
+          echo "POLYPHONY_PDF_PYTHON=$RUNNER_TEMP/polyphony-pdf/bin/python" >> "$GITHUB_ENV"
+          echo 'POLYPHONY_LIBREOFFICE_PYTHON=/usr/bin/python3' >> "$GITHUB_ENV"
       - name: Run zero-dependency test suite
         working-directory: studio
         run: npm test

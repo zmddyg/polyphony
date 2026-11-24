@@ -223,7 +223,7 @@ async function openServer({ role, room, demo, lessonId, lecture, claim, passphra
       const pair = await api(`rooms/${code}/remote-pair`, {});
       return { ...pair, url: link('desk', code, status.publicOrigin || null, { claim: pair.token }) };
     },
-    newRoom(options = {}) { return openServer({ ...options, role: 'teacher' }, status); },
+    newRoom(options = {}) { return openServer({ passphrase, ...options, role: 'teacher' }, status); },
     url(view, extra) {
       const publicView = view === 'student' || view === 'stage' || Boolean(extra?.claim);
       return link(view, code, publicView && status.publicOrigin ? status.publicOrigin : null, extra);

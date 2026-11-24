@@ -543,7 +543,9 @@ export function createMaterialNotebook({ indexedDB, databaseName = defaultDataba
         .map(item => ({ ...item, versionId }));
       return run(['versions', 'documents', 'notes', 'classrooms'], 'readwrite', async ({ versions, documents, notes, classrooms }) => {
         const openedAt = now();
-        const existingVersion = await readRequest(versions.get(versionId));
+        const [existingVersion, existingDocument] = await Promise.all([
+          readRequest(versions.get(versionId)), readRequest(documents.get(versionId)),
+        ]);
         const nextVersion = {
           versionId,
           name,
@@ -562,7 +564,7 @@ export function createMaterialNotebook({ indexedDB, databaseName = defaultDataba
           title,
           type,
           pages,
-          file: null,
+          file: existingDocument?.file ?? null,
           warnings: Array.isArray(doc?.warnings) ? doc.warnings : [],
         };
         await Promise.all([

@@ -1,5 +1,6 @@
 import { exportScore } from './score-package.mjs';
 import { challengeNames, normalizeRcParams } from './challenge-lab.mjs';
+import { isSafeMathML } from './mathml.mjs';
 
 const format = 'polyphony.lecture';
 const version = 1;
@@ -101,8 +102,7 @@ function safeFormulas(value, field) {
   const formulas = value.slice(0, 16).map(item => {
     if (typeof item !== 'string') throw new Error(`${field}的公式格式无效。`);
     const trimmed = item.trim();
-    if (!trimmed.startsWith('<math') || !trimmed.endsWith('</math>') || trimmed.length > 8000 ||
-        /<(?:script|iframe|object|embed|style|img|a|svg)\b|\bon[a-z]+\s*=|javascript:/iu.test(trimmed)) {
+    if (!isSafeMathML(trimmed)) {
       throw new Error(`${field}包含不受支持的公式标记。`);
     }
     return trimmed;

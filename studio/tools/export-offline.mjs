@@ -7,7 +7,7 @@ const dist = fileURLToPath(new URL('../dist/', import.meta.url));
 const preview = process.argv[2] === '--challenges';
 const target = process.argv[preview ? 3 : 2];
 const output = target ? path.resolve(target) : fileURLToPath(new URL(preview ? '../../Polyphony-Playlab.html' : '../../共演演示室.html', import.meta.url));
-const read = async (name) => (await readFile(path.join(dist, name), 'utf8')).replace(/^\uFEFF/, '');
+const read = async (name) => (await readFile(path.join(dist, name), 'utf8')).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
 const dataUrl = (type, value) => `data:${type};base64,${Buffer.from(value).toString('base64')}`;
 const alias = (name) => `@polyphony/${name}`;
 const safeScript = (script) => script.replace(/<\/script/gi, '<\\/script');

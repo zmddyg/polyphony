@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { existsSync, mkdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { networkInterfaces } from 'node:os';
 import { resolve } from 'node:path';
@@ -85,8 +85,9 @@ function externalizeImage(code, src) {
   const raw = Buffer.from(match[2], 'base64');
   const hash = createHash('sha256').update(raw).digest('hex');
   const filename = `${hash}.${ext}`;
-  mkdirSync(lectureAssetsDirectory, { recursive: true, mode: 0o700 });
-  const target = resolve(lectureAssetsDirectory, filename);
+  const directory = resolve(lectureAssetsDirectory, code);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const target = resolve(directory, filename);
   try { writeFileSync(target, raw, { flag: 'wx', mode: 0o600 }); }
   catch (error) { if (error.code !== 'EEXIST') throw error; }
   return `./api/rooms/${code}/assets/${filename}`;
@@ -139,6 +140,21 @@ async function encodedLectureFrame(code, index) {
     if (lecture.frames.size > 8) lecture.frames.delete(lecture.frames.keys().next().value);
   }
   return data;
+}
+
+async function locateLectureAsset(code, filename) {
+  const owned = resolve(lectureAssetsDirectory, code, filename);
+  try { return { file: owned, size: (await stat(owned)).size }; }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+
+  // Early 2.0 snapshots shared a directory. Serve those files only when referenced by this lecture.
+  const shared = resolve(lectureAssetsDirectory, filename);
+  if (!existsSync(shared) || !rooms.get(code)?.room.lecture) return null;
+  const source = './api/rooms/' + code + '/assets/' + filename;
+  const { score } = await getLecture(code);
+  const refersTo = slide => slide.preview === source || slide.images?.some(image => image.src === source);
+  if (!score.pages.some(page => refersTo(page) || page.adopted.some(refersTo))) return null;
+  return { file: shared, size: (await stat(shared)).size };
 }
 
 const privateAddress = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
@@ -468,6 +484,8 @@ export async function serve(req, res) {
       const filename = route.slice('assets/'.length);
       const match = assetNamePattern.exec(filename);
       if (!match) throw failure(404, 'Asset not found.');
+      const asset = await locateLectureAsset(code, filename);
+      if (!asset) throw failure(404, 'Asset not found.');
       const [, hash, ext] = match;
       const tag = `"${hash}"`;
       const headers = {
@@ -479,13 +497,9 @@ export async function serve(req, res) {
         res.writeHead(304, headers);
         return res.end();
       }
-      const data = await readFile(resolve(lectureAssetsDirectory, filename)).catch(error => {
-        if (error.code === 'ENOENT') return null;
-        throw error;
-      });
-      if (!data) throw failure(404, 'Asset not found.');
-      res.writeHead(200, { ...headers, 'Content-Length': data.length });
-      return res.end(req.method === 'HEAD' ? undefined : data);
+      const data = req.method === 'HEAD' ? undefined : await readFile(asset.file);
+      res.writeHead(200, { ...headers, 'Content-Length': asset.size });
+      return res.end(data);
     }
 
     if (route === 'materials/import' && req.method === 'POST') {
@@ -657,7 +671,13 @@ export async function serve(req, res) {
       if (type === 'draw' || type === 'lectureExperimentStart' || (type === 'lectureExperimentAct' && payload.action === 'reset')) {
         command.payload.random = randomInt(2 ** 32) / 2 ** 32;
       }
-      const lectureScore = record.room.lecture && commandNeedsScore(type) ? (await getLecture(code)).score : undefined;
+      let lectureScore;
+      if (record.room.lecture && commandNeedsScore(type)) {
+        lectureScore = (await getLecture(code)).score;
+        // A student can join or submit an answer while a cold lecture is being read.
+        record = rooms.get(code);
+        if (!record) throw failure(404, 'Room not found.');
+      }
       let next;
       try {
         if (type === 'analyze') delete command.payload.analysis;
@@ -718,7 +738,9 @@ function startRoomPruning() {
     try {
       rooms.prune(maxAgeMs, code => {
         lectureCache.delete(code);
+        remoteTokens.delete(code);
         try { unlinkSync(lecturePath(code)); } catch { /* Not every room has a lecture file. */ }
+        if (validRoomCode(code)) rmSync(resolve(lectureAssetsDirectory, code), { recursive: true, force: true });
       });
     } catch (error) { console.error('[Polyphony] room prune failed:', error.message); }
   };

@@ -163,7 +163,8 @@ function downloadFile(content, filename, mime) {
 }
 
 function csvCell(value) {
-  const text = String(value ?? '');
+  const raw = String(value ?? '');
+  const text = /^(?:[\t\r\n]|\s*[=+\-@])/u.test(raw) ? "'" + raw : raw;
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 

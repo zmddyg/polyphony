@@ -1,12 +1,7 @@
 import { isLectureImage, lectureFrame } from '../core/lecture-score.mjs';
+import { isSafeMathML } from '../core/mathml.mjs';
 import { esc } from '../ui.mjs';
 import { renderScienceChart } from './material-science.mjs';
-
-function isSafeMathML(markup) {
-  return typeof markup === 'string' &&
-    /^<math(?:\s[^<>]*)?>[\s\S]*<\/math>$/u.test(markup.trim()) &&
-    !/<(?:script|iframe|object|embed|style|link|img|svg|a)\b|on[a-z]+\s*=|javascript:/iu.test(markup);
-}
 
 function renderImages(images) {
   const figures = (images ?? []).filter(({ src }) => isLectureImage(src));

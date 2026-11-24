@@ -20,9 +20,10 @@ import { applyRoomCommand, createLectureRoom } from '../dist/core/lecture-room.m
 import { buildLectureScore, lectureOutline } from '../dist/core/lecture-score.mjs';
 import { runComposition } from '../dist/core/lesson-composer.mjs';
 import { createMaterialNotebook, makeMaterialVersionId } from '../dist/core/material-notebook.mjs';
+import { isSafeMathML } from '../dist/core/mathml.mjs';
 import { exportScore, importScore } from '../dist/core/score-package.mjs';
 import { buildSciencePacket } from '../dist/core/teaching-science.mjs';
-import { projectRoom } from '../dist/core/transport.mjs';
+import { openSession, projectRoom } from '../dist/core/transport.mjs';
 import { composeLesson as composeWithProvider, requestStructuredCompletion } from '../lesson-provider.mjs';
 import { createPublicRoomEncoder } from '../room-broadcast.mjs';
 import { openRoomStore } from '../room-store.mjs';
@@ -405,6 +406,10 @@ test('Science packets attach native MathML formulas while preserving plain-text 
   const mzi = buildSciencePacket({ model: 'mzi', anchor, parameters: { phaseDeg: 180 } });
   assert.match(rc.slides[1].formulas[0], /^<math[^>]*>.*<mfrac>.*<\/math>$/u);
   assert.match(mzi.slides[1].formulas[0], /^<math[^>]*>.*<msup>.*cos.*<\/math>$/u);
+  assert.ok(isSafeMathML(rc.slides[1].formulas[0]));
+  assert.ok(isSafeMathML(mzi.slides[1].formulas[0]));
+  assert.equal(isSafeMathML('<math><mrow></math>'), false);
+  assert.equal(isSafeMathML('<math><caption>速度</caption></math>'), false);
 });
 
 test('Material notebook supports in-place preview upgrade, experiment kind, exportNotebook/importNotebook, and deleteVersion', async () => {
@@ -412,7 +417,7 @@ test('Material notebook supports in-place preview upgrade, experiment kind, expo
   const notebook = createMaterialNotebook({ indexedDB: idb });
   const versionId = await makeMaterialVersionId({ bytes: 'deck-bytes-v2' });
   await notebook.saveVersion({
-    versionId, name: '光学.pptx', title: '光学', type: 'pptx',
+    versionId, name: '光学.pptx', title: '光学', type: 'pptx', file: new Blob(['original deck']),
     pages: [{ number: 1, title: '第一页', text: '干涉原理', images: [] }],
   });
   await notebook.savePageNote(versionId, 1, { id: 'annotation', kind: 'annotation', packet: { text: '先让学生猜' } });
@@ -431,6 +436,8 @@ test('Material notebook supports in-place preview upgrade, experiment kind, expo
   const bundle = await notebook.exportNotebook(versionId);
   assert.equal(bundle.format, 'polyphony.notebook');
   assert.equal(bundle.notes.length, 2);
+  await notebook.importNotebook(bundle);
+  assert.equal(await (await notebook.getVersion(versionId)).file.text(), 'original deck');
 
   await notebook.deleteVersion(versionId);
   assert.equal(await notebook.getVersion(versionId), null);
@@ -502,7 +509,6 @@ test('Static assets handler supports Brotli when explicitly preferred while keep
 
 async function startLiveServer(t, extraEnv = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'polyphony-e2e-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
   const child = spawn(process.execPath, ['server.mjs'], {
     cwd: STUDIO_DIR,
     env: {
@@ -516,11 +522,12 @@ async function startLiveServer(t, extraEnv = {}) {
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  const closed = new Promise(resolve => child.once('close', resolve));
   t.after(async () => {
-    if (child.exitCode === null) {
-      child.kill('SIGTERM');
-      await new Promise(resolve => child.once('exit', resolve));
-    }
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+    await closed;
+    // SQLite keeps its WAL open on Windows until the server has exited.
+    await rm(dir, { recursive: true, force: true, maxRetries: 3 });
   });
   let output = '';
   const origin = await new Promise((resolve, reject) => {
@@ -617,6 +624,9 @@ test('Live HTTP/SSE server: externalized assets, teacher prefetch vs student 409
   assert.match(assetRes.headers.get('cache-control'), /immutable/u);
   const etag = assetRes.headers.get('etag');
   assert.ok(etag);
+  const imageHead = await fetch(assetUrl, { method: 'HEAD' });
+  assert.equal(imageHead.status, 200);
+  assert.equal(Number(imageHead.headers.get('content-length')), (await assetRes.arrayBuffer()).byteLength);
   const notModified = await fetch(assetUrl, { headers: { 'if-none-match': etag } });
   assert.equal(notModified.status, 304);
 
@@ -726,4 +736,37 @@ test('Live HTTP/SSE server: externalized assets, teacher prefetch vs student 409
   assert.match(sseText, /: synced/u);
   assert.doesNotMatch(sseText, /^data:/mu);
   ac.abort();
+});
+
+test('the teacher desk retains the configured passphrase when starting the next classroom', async t => {
+  let created = 0;
+  t.mock.method(globalThis, 'fetch', async (url, request) => {
+    if (url.pathname === '/api/status') return Response.json({ polyphony: true, passphraseRequired: true });
+    assert.equal(url.pathname, '/api/rooms');
+    assert.equal(request.headers['X-Polyphony-Passphrase'], 'classroom-test');
+    return Response.json({ room: { code: String(++created).padStart(6, '0'), version: 0 } });
+  });
+  const globals = {
+    location: new URL('https://classroom.test/'),
+    sessionStorage: { setItem() {}, getItem() { return null; } },
+    EventSource: class { close() {} },
+  };
+  const descriptors = new Map();
+  try {
+    for (const [name, value] of Object.entries(globals)) {
+      descriptors.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+      Object.defineProperty(globalThis, name, { configurable: true, value });
+    }
+    const first = await openSession({ role: 'teacher', passphrase: 'classroom-test' });
+    try {
+      const second = await first.newRoom({ demo: false });
+      assert.notEqual(second.code, first.code);
+      second.close();
+    } finally { first.close(); }
+  } finally {
+    for (const [name, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else delete globalThis[name];
+    }
+  }
 });
