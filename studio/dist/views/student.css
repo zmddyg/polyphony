@@ -126,6 +126,26 @@
 .ps-branch strong { font-size: 13px; overflow-wrap: anywhere; }
 .ps-empty { margin: 15px 0 0; padding: 12px; border-radius: 8px; background: #f4f6fa; font-size: 13px; color: var(--ps-muted); }
 
+.ps-top-right { display: flex; align-items: center; gap: 8px; }
+.ps-timer { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border: 1px solid #c7d5fb; border-radius: 8px; background: var(--ps-tint); color: #2447b8; font: 700 13px var(--mono, monospace); }
+.ps-profile > div { flex: 1; }
+.ps-rename-trigger { padding: 4px 8px; border: 1px solid var(--ps-line); border-radius: 6px; background: #fff; color: #2c4db8; font-size: 11.5px; font-weight: 650; cursor: pointer; }
+.ps-rename-trigger:hover { background: var(--ps-tint); }
+.ps-rename-form { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--ps-line); display: grid; gap: 8px; }
+.ps-rename-form input { width: 100%; min-height: 38px; padding: 6px 10px; border: 1px solid #cbd6e8; border-radius: 8px; font: inherit; font-size: 14px; }
+.ps-rename-actions { display: flex; gap: 6px; }
+.ps-mini-primary, .ps-mini-plain { min-height: 32px; padding: 4px 10px; border-radius: 7px; font-size: 12px; font-weight: 650; cursor: pointer; }
+.ps-mini-primary { border: 1px solid var(--ps-primary); background: var(--ps-primary); color: #fff; }
+.ps-mini-plain { border: 1px solid var(--ps-line); background: #fff; color: var(--ps-muted); }
+.ps-mzi-mini { margin-bottom: 4px; padding: 6px 8px; border-radius: 8px; background: #fff; border: 1px solid #e1e8fa; }
+.ps-mzi-mini svg { display: block; width: 100%; height: auto; }
+.ps-branch p { margin: 4px 0 0; font-size: 13px; line-height: 1.55; color: #473672; white-space: pre-wrap; }
+.ps-spotlight { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--ps-line); display: grid; gap: 8px; }
+.ps-spotlight h3 { margin: 0; font-size: 13px; color: #36509c; }
+.ps-spotlight blockquote { margin: 0; padding: 9px 11px; border-left: 3px solid #7f9cf5; border-radius: 0 8px 8px 0; background: #f4f7ff; display: grid; gap: 4px; }
+.ps-spotlight blockquote span { font-size: 11px; font-weight: 700; color: #2d4cb0; }
+.ps-spotlight blockquote p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ps-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+
 @media (max-width: 690px) {
   .ps-columns { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .ps-side-column { gap: 12px; }

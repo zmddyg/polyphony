@@ -5,8 +5,10 @@ import { exportScore, importScore } from './score-package.mjs';
 
 const stages = ['prepare', 'generate', 'validate', 'compile'];
 const materialLimit = 12;
-const choiceCount = 3;
-const branchCount = 3;
+const minChoices = 2;
+const maxChoices = 4;
+const minBranches = 2;
+const maxBranches = 3;
 const evidenceLimit = 3;
 const lengths = {
   subject: 80,
@@ -41,8 +43,8 @@ const branchSchema = objectSchema({
 export const COMPOSITION_PLAN_SCHEMA = objectSchema({
   subject: textSchema(lengths.subject),
   prompt: textSchema(lengths.prompt),
-  options: arraySchema(textSchema(lengths.option), choiceCount),
-  branches: arraySchema(branchSchema, branchCount),
+  options: arraySchema(textSchema(lengths.option), 3, maxChoices),
+  branches: arraySchema(branchSchema, minBranches, maxBranches),
 });
 export const COMPOSITION_REFUSED = Symbol('composition provider refusal');
 
@@ -88,9 +90,9 @@ function validate(plan, input) {
   }
   const subject = text(plan.subject, '学科', lengths.subject);
   const prompt = text(plan.prompt, '首答题', lengths.prompt);
-  if (!Array.isArray(plan.options) || plan.options.length !== choiceCount ||
-      !Array.isArray(plan.branches) || plan.branches.length !== branchCount) {
-    throw new Error('需要三个选项和三个教学分支。');
+  if (!Array.isArray(plan.options) || plan.options.length < minChoices || plan.options.length > maxChoices ||
+      !Array.isArray(plan.branches) || plan.branches.length < minBranches || plan.branches.length > maxBranches) {
+    throw new Error(`需要 ${minChoices} 至 ${maxChoices} 个选项和 ${minBranches} 至 ${maxBranches} 条教学分支。`);
   }
   const options = plan.options.map((value, index) => text(value, '选项 ' + (index + 1), lengths.option));
   const knownIds = new Set(input.materials.map(({ id }) => id));
@@ -161,9 +163,10 @@ function compile(plan, input) {
     subject: plan.subject,
     description: input.goal,
     prompt: plan.prompt + '\n\n课堂材料\n' + input.material,
+    materials: input.materials,
     options: plan.options.map((label, index) => ({ id: 'option-' + (index + 1), label })),
-    branches: plan.branches.map(({ title, description, revisionPrompt }, index) =>
-      ({ id: 'branch-' + (index + 1), title, description, revisionPrompt })),
+    branches: plan.branches.map(({ title, description, revisionPrompt, evidenceIds }, index) =>
+      ({ id: 'branch-' + (index + 1), title, description, revisionPrompt, evidenceIds })),
     skills: [input.goal],
     steps: ['独立作答并引用材料', '比较证据与解释', '按教师选择的分支核对，再次作答'],
   };
@@ -247,12 +250,13 @@ export async function runComposition(input, { requestPlan, model, source = 'prov
   signal?.throwIfAborted();
   const { prepared, trace, stage, result, local } = start(input);
   if (model) trace.model = model;
+  let lastReply;
   for (let attempt = 1; attempt <= 2; attempt++) {
     const requestedAt = performance.now();
     trace.attempts = attempt;
     let reply;
     try {
-      reply = await requestPlan(prepared, trace.issues.at(-1)?.message);
+      reply = await requestPlan(prepared, trace.issues.at(-1)?.message, lastReply);
     } catch (error) {
       signal?.throwIfAborted();
       stage('generate', 'failed', requestedAt);
@@ -269,6 +273,7 @@ export async function runComposition(input, { requestPlan, model, source = 'prov
       break;
     }
     stage('generate', 'ok', requestedAt);
+    lastReply = typeof reply === 'string' ? reply : undefined;
 
     const validatesAt = performance.now();
     let plan;

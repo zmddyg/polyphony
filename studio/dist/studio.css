@@ -140,6 +140,17 @@ textarea:focus-visible, summary:focus-visible {
 .input-line input[readonly] { font: 12px var(--mono); }
 .field-select { width: 100%; }
 .dialog-full { width: 100%; margin-top: 14px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.action-danger {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-height: 42px; padding: 0 16px; border: 0; border-radius: 9px;
+  background: var(--danger, #c23535); color: #fff; font-weight: 640; cursor: pointer;
+}
+.action-danger:hover { filter: brightness(0.92); }
+.shell-entry-passphrase {
+  display: block; width: 100%; min-height: 44px; margin: 6px 0 14px; padding: 10px 12px;
+  border: 1px solid #cfd8e8; border-radius: 10px; background: #fff; color: var(--ink); font: inherit;
+}
 .room-modes { margin: 14px 0 0; padding: 0; border: 0; }
 .room-modes legend { padding: 0; }
 .room-modes > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }

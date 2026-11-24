@@ -1,8 +1,10 @@
 import { exportScore } from './score-package.mjs';
+import { challengeNames, normalizeRcParams } from './challenge-lab.mjs';
 
 const format = 'polyphony.lecture';
 const version = 1;
 const imagePrefix = /^data:image\/(?:png|jpeg|gif|webp|bmp);base64,/u;
+const roomAssetPattern = /^\.\/api\/rooms\/[A-Z0-9]{6}\/assets\/[0-9a-f]{64}\.(?:png|jpe?g|gif|webp|bmp)$/u;
 export const MAX_LECTURE_BYTES = 64 * 1024 * 1024;
 
 function requiredText(value, field) {
@@ -27,6 +29,8 @@ function paragraphs(value, field) {
 }
 
 export const isEmbeddedLectureImage = src => typeof src === 'string' && imagePrefix.test(src);
+export const isRoomAssetUrl = src => typeof src === 'string' && roomAssetPattern.test(src);
+export const isLectureImage = src => isEmbeddedLectureImage(src) || isRoomAssetUrl(src);
 
 function image(src, field) {
   if (!isEmbeddedLectureImage(src)) throw new Error(`${field}须使用已嵌入的原稿图片。`);
@@ -91,6 +95,33 @@ function chart(slide, field) {
   return result;
 }
 
+function safeFormulas(value, field) {
+  if (value === undefined) return {};
+  if (!Array.isArray(value)) throw new Error(`${field}的公式列表格式无效。`);
+  const formulas = value.slice(0, 16).map(item => {
+    if (typeof item !== 'string') throw new Error(`${field}的公式格式无效。`);
+    const trimmed = item.trim();
+    if (!trimmed.startsWith('<math') || !trimmed.endsWith('</math>') || trimmed.length > 8000 ||
+        /<(?:script|iframe|object|embed|style|img|a|svg)\b|\bon[a-z]+\s*=|javascript:/iu.test(trimmed)) {
+      throw new Error(`${field}包含不受支持的公式标记。`);
+    }
+    return trimmed;
+  }).filter(Boolean);
+  return formulas.length ? { formulas } : {};
+}
+
+function pageExperiment(value, field) {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== 'object' || !Object.hasOwn(challengeNames, value.kind)) {
+    throw new Error(`${field}的实验类型不受支持。`);
+  }
+  const experiment = { kind: value.kind };
+  if (value.kind === 'rc' && value.params && typeof value.params === 'object') {
+    experiment.params = normalizeRcParams(value.params);
+  }
+  return { experiment };
+}
+
 function classMaterial(page, source) {
   const { number } = page;
   const field = `原稿第 ${number} 页`;
@@ -100,6 +131,7 @@ function classMaterial(page, source) {
     return {
       title: requiredText(slide?.title, `${caption}标题`),
       body: paragraphs(slide.body, caption),
+      ...safeFormulas(slide.formulas, caption),
       ...visuals(slide, caption),
       ...chart(slide, caption),
     };
@@ -110,7 +142,9 @@ function classMaterial(page, source) {
     title: requiredText(page.title, `${field}标题`),
     body: paragraphs(page.body, field),
     source: { name: source.name, pageNumber: number },
+    ...safeFormulas(page.formulas, field),
     ...visuals(page, field),
+    ...pageExperiment(page.experiment, field),
     adopted,
   };
   if (page.interaction !== undefined) result.interaction = JSON.parse(exportScore(page.interaction)).lesson;
@@ -165,7 +199,7 @@ export function validateLectureScore(score) {
   return lecture;
 }
 
-export function buildLectureScore(material, adoptedByPage = new Map(), { title, interactionsByPage = new Map() } = {}) {
+export function buildLectureScore(material, adoptedByPage = new Map(), { title, interactionsByPage = new Map(), experimentsByPage = new Map() } = {}) {
   if (!Array.isArray(material?.pages) || !material.pages.length) throw new Error('请先导入有页码的原稿。');
   const name = material.name || material.title;
   const pages = [];
@@ -177,14 +211,17 @@ export function buildLectureScore(material, adoptedByPage = new Map(), { title, 
     const pageTitle = optionalText(page.title, `${field}标题`) || `第 ${number} 页`;
     const body = paragraphs(optionalText(page.text, `${field}正文`).split(/\r\n?|\n/u), field);
     if (body[0] === pageTitle) body.shift();
+    const experiment = experimentsByPage.get(number) ?? page.experiment;
     pages.push({
       number,
       title: pageTitle,
       body,
+      ...(page.formulas?.length && { formulas: page.formulas }),
       preview: page.preview,
       images: page.images,
       adopted: adoptedByPage.get(number)?.slides ?? [],
       interaction: interactionsByPage.get(number),
+      ...(experiment && { experiment }),
     });
   }
   pages.sort((a, b) => a.number - b.number);
@@ -202,6 +239,33 @@ export function lectureFrames(lecture) {
     { pageIndex, slideIndex: -1 },
     ...page.adopted.map((_, slideIndex) => ({ pageIndex, slideIndex })),
   ]) ?? [];
+}
+
+export function lectureOutline(lecture) {
+  const items = [];
+  for (const page of lecture?.pages ?? []) {
+    items.push({
+      index: items.length,
+      pageNumber: page.number,
+      title: page.title,
+      supplemental: false,
+      hasInteraction: Boolean(page.interaction),
+      experimentKind: page.experiment?.kind ?? null,
+      ...(page.experiment && { experiment: page.experiment }),
+    });
+    for (const slide of page.adopted) {
+      items.push({
+        index: items.length,
+        pageNumber: page.number,
+        title: slide.title,
+        supplemental: true,
+        hasInteraction: Boolean(page.interaction),
+        experimentKind: page.experiment?.kind ?? null,
+        ...(page.experiment && { experiment: page.experiment }),
+      });
+    }
+  }
+  return items;
 }
 
 export function locateLectureFrame(lecture, index) {
@@ -222,12 +286,13 @@ export function lectureFrame(lecture, index) {
   if (!frame) return null;
   const page = lecture.pages[frame.pageIndex];
   const slide = frame.slideIndex === -1 ? page : page.adopted[frame.slideIndex];
-  const { title, body, preview, images, omittedImages, points, series, xLabel, yLabel } = slide;
+  const { title, body, formulas, preview, images, omittedImages, points, series, xLabel, yLabel } = slide;
   return {
     title,
     body,
     source: { name: lecture.source.name, pageNumber: page.number },
     pageNumber: page.number,
+    ...(formulas?.length && { formulas }),
     ...(preview && { preview }),
     ...(images && { images }),
     ...(omittedImages && { omittedImages }),
@@ -235,5 +300,6 @@ export function lectureFrame(lecture, index) {
     ...(series && { series }),
     ...(xLabel && { xLabel }),
     ...(yLabel && { yLabel }),
+    ...(page.experiment && { experiment: page.experiment }),
   };
 }

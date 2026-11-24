@@ -3,7 +3,7 @@ import { lectureModelPages, localLecturePlan, plannerPages } from './dist/core/l
 // TypeSafe System One: https://docs.typesafe.ai/api/system-one
 const systemOneEndpoint = 'https://api.typesafe.ai/v1/systemone';
 const defaultModel = 'jev-latest';
-const defaultTimeoutMs = 3200;
+const defaultTimeoutMs = Number(process.env.POLYPHONY_JEV_TIMEOUT_MS) || 3200;
 const minimumConfidence = 0.55;
 const pagesPerRequest = 12;
 
@@ -12,7 +12,8 @@ const criteria = {
   mzi: 'Balanced two-port Mach–Zehnder interference linking phase difference and redistribution of output power.',
   history: 'Historical question with original sources or claims to compare and corroborate evidence.',
   blackbox: 'Input–output number pattern where a new input distinguishes competing numerical rules.',
-  none: 'Title, contents, general discussion, or insufficient concrete material for the four activities.',
+  inquiry: 'Conceptual misconception, prediction, or discussion question in any subject suitable for whole-class voting.',
+  none: 'Title, contents, general discussion, or insufficient concrete material for an interactive activity.',
 };
 const kinds = Object.keys(criteria);
 
@@ -21,6 +22,7 @@ const reasons = {
   mzi: '可比较马赫–曾德尔干涉仪两端的功率，解释相位差带来的变化。',
   history: '可让学生对照史料，核对不同说法的依据。',
   blackbox: '可让学生用一次新输入检验不同的数值规则。',
+  inquiry: '本页包含适合发起全班预测与概念辨析的讨论问题，可一键生成课堂互动。',
 };
 
 export function isJevConfigured({ key = process.env.POLYPHONY_JEV_KEY } = {}) {

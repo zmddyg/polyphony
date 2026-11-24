@@ -99,7 +99,16 @@ function validateLesson(input) {
       title: clean(item?.title, 120, '分支标题'),
       description: clean(item?.description, 700, '分支说明'),
       ...(item?.revisionPrompt && { revisionPrompt: clean(item.revisionPrompt, 700, '改答问题') }),
+      ...(Array.isArray(item?.evidenceIds) && item.evidenceIds.length && {
+        evidenceIds: [...new Set(item.evidenceIds.slice(0, 6).map((ref) => clean(ref, 16, '引用编号')))],
+      }),
     })),
+    ...(Array.isArray(input.materials) && input.materials.length && {
+      materials: unique(input.materials, '编号材料', 1, 12, (item) => ({
+        id: clean(item?.id, 16, '材料编号'),
+        text: clean(item?.text, 2200, '材料原文'),
+      })),
+    }),
     skills: notes(input.skills, '能力目标'),
     steps: notes(input.steps, '课堂步骤'),
   };
@@ -131,6 +140,9 @@ function startLesson(lesson) {
     decision: null,
     analysis: null,
     winner: null,
+    winnerVisible: false,
+    spotlight: [],
+    timer: null,
   };
 }
 
@@ -252,12 +264,55 @@ export function analyze(state) {
   };
 }
 
-function validateProviderAnalysis(provider, fallback) {
+export function analysisCandidates(state, limit = 48) {
+  const live = [];
+  const simulated = [];
+  for (const response of state.responses) {
+    if (response.round === state.round) (response.simulated ? simulated : live).push(response);
+  }
+  const sample = live.length ? live : simulated;
+  if (!sample.length) return [];
+  const buckets = new Map(state.lesson.options.map(({ id }) => [id, []]));
+  for (const response of sample) {
+    const list = buckets.get(response.optionId);
+    if (list) list.push(response);
+  }
+  for (const list of buckets.values()) {
+    list.sort((a, b) => Number(Boolean(b.reason?.trim())) - Number(Boolean(a.reason?.trim())));
+  }
+  const chosen = [];
+  const seen = new Set();
+  const fallback = analyze(state);
+  for (const item of fallback.evidence) {
+    const original = sample.find((r) => r.id === item.id);
+    if (original && !seen.has(original.id)) {
+      seen.add(original.id);
+      chosen.push(original);
+    }
+  }
+  const lists = [...buckets.values()];
+  let progress = true;
+  while (chosen.length < limit && progress) {
+    progress = false;
+    for (const list of lists) {
+      while (list.length && seen.has(list[0].id)) list.shift();
+      if (!list.length) continue;
+      const next = list.shift();
+      seen.add(next.id);
+      chosen.push(next);
+      progress = true;
+      if (chosen.length >= limit) break;
+    }
+  }
+  return chosen.map((response) => responseEvidence(state, response));
+}
+
+function validateProviderAnalysis(provider, fallback, candidates = fallback.evidence) {
   if (!provider || typeof provider !== 'object') fail('收到的分析格式无效。');
-  const validIds = new Map(fallback.evidence.map((item) => [item.id, item]));
+  const validIds = new Map([...fallback.evidence, ...candidates].map((item) => [item.id, item]));
   const recommendedId = provider.recommendedId ?? fallback.recommendedId;
   if (!fallback.branches.some(({ id }) => id === recommendedId)) fail('分析推荐了不存在的分支。');
-  if (!fallback.evidence.length) return fallback;
+  if (!validIds.size) return fallback;
   if (!Array.isArray(provider.evidence) || provider.evidence.length < 1 || provider.evidence.length > 6) {
     fail('分析须引用本轮已提交的课堂证据。');
   }
@@ -270,11 +325,34 @@ function validateProviderAnalysis(provider, fallback) {
     ids.add(original.id);
     return original;
   });
-  const contrast = (fallback.contrastEvidenceIds ?? []).map((id) => validIds.get(id));
+  let clusters;
+  if (provider.clusters !== undefined) {
+    if (!Array.isArray(provider.clusters)) fail('观点聚类格式无效。');
+    const kept = [];
+    for (const cluster of provider.clusters) {
+      if (!cluster || typeof cluster !== 'object') continue;
+      const label = typeof cluster.label === 'string' ? cluster.label.trim().slice(0, 48) : '';
+      const summary = typeof cluster.summary === 'string' ? cluster.summary.trim().slice(0, 180) : '';
+      if (!label || !summary || !Array.isArray(cluster.evidenceIds)) continue;
+      const uniqueRefs = [...new Set(cluster.evidenceIds.filter((id) => validIds.has(id)))].slice(0, 6);
+      if (!uniqueRefs.length) continue;
+      kept.push({ label, summary, evidenceIds: uniqueRefs });
+      if (kept.length >= 4) break;
+    }
+    if (kept.length) clusters = kept;
+  }
+  const headline = typeof provider.headline === 'string' && provider.headline.trim()
+    ? clean(provider.headline, 80, '诊断结论') : fallback.headline;
+  const summary = typeof provider.summary === 'string' && provider.summary.trim()
+    ? clean(provider.summary, 280, '诊断说明') : fallback.summary;
+  const contrast = (fallback.contrastEvidenceIds ?? []).map((id) => validIds.get(id)).filter(Boolean);
   const required = new Set(contrast.map(({ id }) => id));
   return {
     ...fallback,
+    headline,
+    summary,
     evidence: [...contrast, ...evidence.filter(({ id }) => !required.has(id))].slice(0, 6),
+    ...(clusters && { clusters }),
     recommendedId,
     source: 'provider',
   };
@@ -351,6 +429,16 @@ export function reduceRoom(state, { type, payload = {} }) {
         : [...state.participants, participant];
       return transition({ participants }, existing ? '同学更新了显示名' : '有同学加入课堂', { participantId: id });
     }
+    case 'removeParticipant': {
+      const id = clean(payload.participantId, 100, '学员编号');
+      const existing = state.participants.find((participant) => participant.id === id);
+      if (!existing || existing.simulated) fail('只能清理未提交作答的现场在线记录。');
+      if (state.responses.some((response) => response.participantId === id)) {
+        fail('该同学已提交作答记录，不能移除。');
+      }
+      const participants = state.participants.filter((participant) => participant.id !== id);
+      return transition({ participants }, '已清理未作答的重复加入记录', { participantId: id });
+    }
     case 'respond': {
       requirePhase('collect');
       const { participantId, optionId } = payload;
@@ -381,13 +469,65 @@ export function reduceRoom(state, { type, payload = {} }) {
     case 'reveal':
       if (state.phase === 'reveal') return state;
       requirePhase('collect');
-      return transition({ phase: 'reveal' }, '本轮作答已公布', { round: state.round });
+      return transition({ phase: 'reveal', timer: null }, '本轮作答已公布', { round: state.round });
     case 'analyze': {
       requirePhase('reveal', 'branch');
       const fallback = analyze(state);
-      const analysis = payload.analysis === undefined ? fallback : validateProviderAnalysis(payload.analysis, fallback);
+      const candidates = payload.analysis === undefined ? fallback.evidence : analysisCandidates(state, 48);
+      const analysis = payload.analysis === undefined ? fallback : validateProviderAnalysis(payload.analysis, fallback, candidates);
       if (JSON.stringify(analysis) === JSON.stringify(state.analysis)) return state;
       return transition({ analysis }, '已整理课堂证据', { source: analysis.source, evidenceIds: analysis.evidence.map(({ id }) => id) });
+    }
+    case 'spotlight': {
+      requirePhase('reveal', 'branch', 'closed');
+      if (!Array.isArray(payload.responseIds) || payload.responseIds.length > 2) {
+        fail('大屏最多同时对比展示 2 条匿名原话。');
+      }
+      const uniqueIds = [...new Set(payload.responseIds)];
+      if (uniqueIds.length !== payload.responseIds.length) fail('投屏原话编号不能重复。');
+      const spotlight = uniqueIds.map((id) => {
+        const response = state.responses.find((item) => item.id === id && item.round === state.round);
+        if (!response) fail('只能投屏本轮已提交的课堂作答。');
+        const reason = typeof response.reason === 'string' ? response.reason.trim() : '';
+        if (!reason) fail('这条作答没有填写文字理由。');
+        const option = state.lesson.options.find((item) => item.id === response.optionId);
+        return {
+          id: response.id,
+          optionId: response.optionId,
+          optionLabel: option?.label ?? response.optionId,
+          round: response.round,
+          text: reason.slice(0, 280),
+          simulated: Boolean(response.simulated),
+        };
+      });
+      if (JSON.stringify(spotlight) === JSON.stringify(state.spotlight ?? [])) return state;
+      return transition({ spotlight }, spotlight.length ? '已匿名投屏典型作答' : '已取消大屏作答对比', {
+        round: state.round,
+        count: spotlight.length,
+        evidenceIds: spotlight.map(({ id }) => id),
+      });
+    }
+    case 'spotlightWinner': {
+      if (!state.winner) fail('请先完成一次抽签。');
+      const visible = Boolean(payload.visible);
+      if (Boolean(state.winnerVisible) === visible) return state;
+      return transition({ winnerVisible: visible }, visible ? '已在大屏公布抽签结果' : '已隐藏大屏抽签结果', {
+        visible, participantId: state.winner.id,
+      });
+    }
+    case 'timer': {
+      requirePhase('collect', 'reveal', 'branch');
+      const rawSeconds = payload.seconds ?? payload.durationSec;
+      const seconds = rawSeconds == null ? 0 : Number(rawSeconds);
+      if (!Number.isInteger(seconds) || (seconds !== 0 && (seconds < 15 || seconds > 1800))) {
+        fail('计时时长须为 15 至 1800 秒。');
+      }
+      const startedAt = Number.isFinite(at) ? at : Date.now();
+      const timer = seconds ? { startedAt, seconds, durationSec: seconds, endsAt: startedAt + seconds * 1000 } : null;
+      if (!timer && !state.timer) return state;
+      return transition({ timer }, timer ? `已开启 ${Math.round(seconds / 60 * 10) / 10} 分钟倒计时` : '已结束倒计时', {
+        seconds, durationSec: seconds, endsAt: timer?.endsAt ?? null, round: state.round,
+      });
     }
     case 'branch': {
       if (state.phase === 'branch' && state.decision?.branchId === payload.branchId) return state;
@@ -405,14 +545,14 @@ export function reduceRoom(state, { type, payload = {} }) {
       if (state.round !== 1 || !state.decision) fail('请先选定第一轮的教学分支。');
       const branch = state.lesson.branches.find(({ id }) => id === state.decision.branchId);
       const revisionPrompt = branch.revisionPrompt ?? ('完成「' + branch.title + '」后，结合新证据重新回答题目。' + state.lesson.prompt);
-      return transition({ phase: 'collect', round: 2, analysis: null, revisionPrompt }, '第二轮改答已开启', {
+      return transition({ phase: 'collect', round: 2, analysis: null, spotlight: [], winnerVisible: false, timer: null, revisionPrompt }, '第二轮改答已开启', {
         round: 2, branchId: branch.id, revisionPrompt,
       });
     }
     case 'close':
       if (state.phase === 'closed') return state;
       requirePhase('reveal', 'branch');
-      return transition({ phase: 'closed' }, '课堂已结束', { round: state.round });
+      return transition({ phase: 'closed', timer: null }, '课堂已结束', { round: state.round });
     case 'draw': {
       const candidates = drawCandidates(state);
       const eligibleCount = candidates.length;
@@ -426,7 +566,7 @@ export function reduceRoom(state, { type, payload = {} }) {
         eligibleSource: simulated ? 'simulated' : 'live',
         eligibleIds: candidates.map((participant) => participant.id),
       };
-      return transition({ winner }, simulated ? '已从模拟作答者中抽签' : '已从提交作答的同学中抽签', detail);
+      return transition({ winner, winnerVisible: false }, simulated ? '已从模拟作答者中抽签' : '已从提交作答的同学中抽签', detail);
     }
     case 'switchLesson': {
       const lesson = resolveLesson(payload.lessonId, state.customLessons);

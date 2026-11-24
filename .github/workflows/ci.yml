@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }} regression suite
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Verify Python helper syntax
+        run: python3 -m py_compile studio/tools/material-import-*.py
+      - name: Run zero-dependency test suite
+        working-directory: studio
+        run: npm test
+      - name: Verify offline standalone exports stay in sync
+        working-directory: studio
+        run: |
+          node tools/export-offline.mjs /tmp/共演演示室.html
+          node tools/export-offline.mjs --challenges /tmp/Polyphony-Playlab.html
+          diff -u ../共演演示室.html /tmp/共演演示室.html
+          diff -u ../Polyphony-Playlab.html /tmp/Polyphony-Playlab.html

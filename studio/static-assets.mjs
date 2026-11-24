@@ -2,9 +2,10 @@ import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
-import { gzip } from 'node:zlib';
+import { brotliCompress, constants as zlibConstants, gzip } from 'node:zlib';
 
-const compress = promisify(gzip);
+const compressGzip = promisify(gzip);
+const compressBrotli = promisify(brotliCompress);
 const types = new Map([
   ['.html', 'text/html; charset=utf-8'], ['.mjs', 'text/javascript; charset=utf-8'],
   ['.js', 'text/javascript; charset=utf-8'], ['.css', 'text/css; charset=utf-8'],
@@ -18,11 +19,13 @@ const error = (status, message) => Object.assign(new Error(message), { status })
 function selectEncoding(header = '', canCompress) {
   const weights = new Map();
   for (const entry of header.toLowerCase().split(',')) {
-    const match = /^\s*(gzip|identity|\*)\s*(?:;\s*q\s*=\s*(0(?:\.\d{0,3})?|1(?:\.0{0,3})?))?\s*$/.exec(entry);
+    const match = /^\s*(br|gzip|identity|\*)\s*(?:;\s*q\s*=\s*(0(?:\.\d{0,3})?|1(?:\.0{0,3})?))?\s*$/.exec(entry);
     if (match) weights.set(match[1], Number(match[2] ?? 1));
   }
   const zipped = canCompress ? weights.get('gzip') ?? weights.get('*') ?? 0 : 0;
+  const brotli = canCompress ? weights.get('br') ?? 0 : 0;
   const plain = weights.get('identity') ?? (weights.get('*') === 0 ? 0 : undefined);
+  if (brotli > zipped && brotli > 0 && (plain === undefined || brotli >= plain)) return 'br';
   if (zipped > 0 && (plain === undefined || zipped >= plain)) return 'gzip';
   if (plain !== 0) return 'identity';
   throw error(406, 'No acceptable representation.');
@@ -44,16 +47,19 @@ export function createStaticHandler(directory) {
   const cache = new Map();
 
   // Share the first compression across concurrent clients. Only small text assets enter this cache.
-  function compressed(filename, tag) {
-    let entry = cache.get(filename);
-    cache.delete(filename);
+  function compressed(filename, tag, encoding) {
+    const cacheKey = `${filename}:${encoding}`;
+    let entry = cache.get(cacheKey);
+    cache.delete(cacheKey);
     if (entry?.tag !== tag) {
-      const data = readFile(filename).then(bytes => compress(bytes, { level: 4 }));
+      const data = readFile(filename).then(bytes => encoding === 'br'
+        ? compressBrotli(bytes, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 4 } })
+        : compressGzip(bytes, { level: 4 }));
       entry = { tag, data };
-      data.catch(() => { if (cache.get(filename) === entry) cache.delete(filename); });
+      data.catch(() => { if (cache.get(cacheKey) === entry) cache.delete(cacheKey); });
     }
-    cache.set(filename, entry);
-    if (cache.size > 64) cache.delete(cache.keys().next().value);
+    cache.set(cacheKey, entry);
+    if (cache.size > 96) cache.delete(cache.keys().next().value);
     return entry.data;
   }
 
@@ -70,14 +76,14 @@ export function createStaticHandler(directory) {
     });
     if (!info?.isFile()) throw error(404, 'File not found.');
     const extension = extname(filename).toLowerCase();
-    const canCompress = compressible.has(extension) && info.size >= 1024 && info.size <= 128 * 1024;
+    const canCompress = compressible.has(extension) && info.size >= 1024 && info.size <= 512 * 1024;
     const encoding = selectEncoding(req.headers['accept-encoding'], canCompress);
     const tag = 'W/"' + [info.size, info.mtimeMs, info.ctimeMs].map(n => n.toString(36)).join('-') + '-' + encoding + '"';
     const headers = {
       'Content-Type': types.get(extension) ?? 'application/octet-stream',
       'Cache-Control': 'no-cache', 'Last-Modified': info.mtime.toUTCString(), ETag: tag,
       ...(canCompress && { Vary: 'Accept-Encoding' }),
-      ...(encoding === 'gzip' && { 'Content-Encoding': 'gzip' }),
+      ...(encoding !== 'identity' && { 'Content-Encoding': encoding }),
     };
     if (isFresh(req.headers, tag, info.mtimeMs)) {
       res.writeHead(304, headers);
@@ -88,8 +94,8 @@ export function createStaticHandler(directory) {
       res.writeHead(200, headers);
       return res.end();
     }
-    if (encoding === 'gzip') {
-      const data = await compressed(filename, tag);
+    if (encoding !== 'identity') {
+      const data = await compressed(filename, tag, encoding);
       res.writeHead(200, { ...headers, 'Content-Length': data.length });
       return res.end(data);
     }

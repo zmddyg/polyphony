@@ -221,14 +221,24 @@ export function mountMaterialScience(root, { anchor, onAdopt, adoptedPacket, mod
       if (use) use.disabled = dirty || adopting || !allPassed;
     }
 
+    function isSafeMath(markup) {
+      return typeof markup === 'string' &&
+        /^<math(?:\s[^<>]*)?>[\s\S]*<\/math>$/u.test(markup.trim()) &&
+        !/<(?:script|iframe|object|embed|style|link|img|svg|a)\b|on[a-z]+\s*=|javascript:/iu.test(markup);
+    }
+
     function showSlide() {
       const index = run.selected;
       if (shown === index) return;
       previews[shown]?.setAttribute('aria-pressed', 'false');
       previews[index].setAttribute('aria-pressed', 'true');
       const slide = packet.slides[index];
+      const mathBlocks = (slide.formulas ?? []).filter(isSafeMath);
+      const mathHtml = mathBlocks.length
+        ? `<div class="psci-formulas">${mathBlocks.map(m => `<div class="psci-formula-block">${m}</div>`).join('')}</div>`
+        : '';
       slideMarkup[index] ??= `<h4>${esc(slide.title)}</h4>
-        ${slide.body.map(line => `<p>${esc(line)}</p>`).join('')}${renderScienceChart(slide)}`;
+        ${slide.body.map(line => `<p>${esc(line)}</p>`).join('')}${mathHtml}${renderScienceChart(slide)}`;
       slideHost.innerHTML = slideMarkup[index];
       shown = index;
     }

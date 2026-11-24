@@ -160,9 +160,41 @@
 .stage-interference .stage-option-result { gap: 4px; }
 .stage-interference .stage-result-track { height: clamp(6px, .75vw, 13px); }
 
+.stage-timer {
+  display: inline-flex; align-items: center; gap: 7px; min-height: 42px; padding: 6px 12px;
+  border: 1px solid #5976b3; border-radius: 9px; background: #1d3258; color: #dbe7ff;
+  font: 700 18px var(--mono); letter-spacing: .04em; white-space: nowrap;
+}
+.stage-timer[hidden] { display: none; }
+.stage-timer.is-urgent { border-color: #f08a72; background: #4a2324; color: #ffd4c9; }
+.stage-winner {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 18px; padding: 12px 16px;
+  border: 1px solid #f0c276; border-radius: 11px; background: linear-gradient(135deg, #3a2d1b, #282018); color: #ffe6b8;
+}
+.stage-winner strong { font-size: clamp(1.2rem, 2.2vw, 2rem); color: #fff6e0; }
+.stage-shift-summary {
+  margin: 12px 0 2px; padding: 9px 13px; border-radius: 9px;
+  background: #17343e; border: 1px solid #2d626e; color: #b8f0e4; font-size: clamp(.84rem, 1.25vw, 1.12rem);
+}
+.stage-shift-summary strong { color: #e2fff8; }
+.stage-delta { font-size: .78em; color: var(--stage-secondary); }
+.stage-delta.is-up { color: #7ce8c3; }
+.stage-delta.is-down { color: #f6bd84; }
+.stage-spotlight { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--stage-line); display: grid; gap: 10px; }
+.stage-spotlight h3 { margin: 0; font-size: clamp(.92rem, 1.3vw, 1.2rem); color: #c7d7fc; }
+.stage-spotlight-grid { display: grid; gap: 12px; }
+.stage-spotlight-grid.is-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.stage-quote {
+  margin: 0; padding: 13px 15px; border: 1px solid #415987; border-radius: 12px;
+  background: #15213a; display: grid; gap: 8px;
+}
+.stage-quote header { display: flex; align-items: center; gap: 8px; font-size: clamp(.84rem, 1.15vw, 1.05rem); color: #c4d5fb; }
+.stage-quote p { margin: 0; font-size: clamp(.98rem, 1.55vw, 1.45rem); line-height: 1.55; color: #f4f7ff; overflow-wrap: anywhere; white-space: pre-wrap; }
+
 @media (max-width: 760px) {
   .stage-body { min-height: 0; grid-template-columns: minmax(0, 1fr); align-items: start; }
   .stage-curve svg { max-height: none; }
+  .stage-spotlight-grid.is-pair { grid-template-columns: 1fr; }
 }
 @media (max-width: 530px) {
   .stage-header { min-height: 59px; gap: 6px; padding: 8px 12px; }

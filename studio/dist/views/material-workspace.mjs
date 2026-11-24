@@ -3,16 +3,28 @@ import { readPptx } from '../core/pptx-reader.mjs';
 import { readLegacySlides } from '../core/legacy-ppt.mjs';
 import { createMaterialNotebook, makeMaterialVersionId } from '../core/material-notebook.mjs';
 import { buildLectureScore } from '../core/lecture-score.mjs';
+import { challengeNames, rcDefaults } from '../core/challenge-lab.mjs';
 import { mountMaterialScience } from './material-science.mjs';
 import { renderMaterialNotes } from './material-notes.mjs';
 import { renderMaterialWorkshop } from './workshop.mjs';
 
 const imageData = /^data:image\/(?:png|jpeg|gif|webp|bmp);base64,/u;
 const supported = new Set(['ppt', 'pptx', 'pdf']);
-const activityTitles = { mzi: '干涉仪的两个输出端', blackbox: '数字黑箱', history: '史料互证', rc: 'RC 一阶电路' };
+const activityTitles = {
+  mzi: '干涉仪的两个输出端',
+  blackbox: '数字黑箱',
+  history: '史料互证',
+  rc: 'RC 一阶电路',
+  inquiry: '概念辨析互动',
+};
 const planSources = { provider: '模型建议', jev: 'Jev 快速建议', local: '本地规则' };
 const supplementKinds = ['handout', 'science'];
-const noteLabels = { handout: '补充讲义', science: '理科讲解', classroom: '课堂互动' };
+const noteLabels = { handout: '补充讲义', science: '理科讲解', classroom: '课堂互动', experiment: '课堂实验' };
+const experimentOptions = [
+  { kind: 'rc', title: challengeNames.rc, desc: '一阶 RC 故障排查：全班只有一次仪表测量机会，可继承本页理科模板的 R/C/V₀/V∞ 参数。' },
+  { kind: 'light', title: challengeNames.light, desc: '马赫–曾德尔干涉仪拟合与盲测挑战：用 3 个采样点拟合后选盲测角度验收。' },
+  { kind: 'blackbox', title: challengeNames.blackbox, desc: '数字黑箱规则检验：已知 0→0、2→4，全班投出一个输入数字尝试区分 x² 与 2x。' },
+];
 
 const pageLabel = (version, number) => `《${version.name}》第 ${number} 页`;
 const noteSource = (version, page) => ({
@@ -21,6 +33,33 @@ const noteSource = (version, page) => ({
 const noteKey = (versionId, pageNumber, id) => JSON.stringify([versionId, pageNumber, id]);
 const plainLines = text => text.split(/\r\n?|\n/u).map(line => line.trim()).filter(Boolean);
 const isAdopted = note => note?.adoption && note.adoption.withdrawnAt == null;
+
+function isSafeMathML(markup) {
+  return typeof markup === 'string' &&
+    /^<math(?:\s[^<>]*)?>[\s\S]*<\/math>$/u.test(markup.trim()) &&
+    !/<(?:script|iframe|object|embed|style|link|img|svg|a)\b|on[a-z]+\s*=|javascript:/iu.test(markup);
+}
+
+function parsePastedPages(defaultTitle, rawText) {
+  const normalized = rawText.replace(/\r\n?/gu, '\n').trim();
+  const byRule = normalized.split(/\n[ \t]*-{3,}[ \t]*\n/u).map(chunk => chunk.trim()).filter(Boolean);
+  let sections = byRule;
+  if (sections.length === 1 && /^#\s+/mu.test(normalized)) {
+    const splitHeadings = normalized.split(/(?=^#\s+)/mu).map(chunk => chunk.trim()).filter(Boolean);
+    if (splitHeadings.length > 1) sections = splitHeadings;
+  }
+  if (sections.length <= 1) {
+    return [{ number: 1, title: defaultTitle, text: normalized, images: [] }];
+  }
+  return sections.map((chunk, idx) => {
+    const lines = chunk.split('\n');
+    const headingMatch = lines[0]?.match(/^#{1,3}\s+(.+)$/u);
+    const title = headingMatch ? headingMatch[1].trim().slice(0, 120)
+      : (lines[0]?.trim().slice(0, 80) || `${defaultTitle} · 第 ${idx + 1} 页`);
+    const body = headingMatch ? lines.slice(1).join('\n').trim() : chunk;
+    return { number: idx + 1, title, text: body || title, images: [] };
+  });
+}
 
 function importedMaterial(result, type, file, versionId) {
   if (!result?.pages?.length) throw new Error('课件没有可读取的页。');
@@ -43,6 +82,10 @@ function renderSource(version, page, e) {
   const title = page.title || `第 ${page.number} 页`;
   const embedded = page.preview ? [] : (page.images ?? []).filter(figure => figure.src !== page.preview);
   const figures = embedded.length ? `<div class="mw-figures">${embedded.map(figure => `<img loading="lazy" src="${e(figure.src)}" alt="${e(figure.alt || figure.name || '原课件插图')}">`).join('')}</div>` : '';
+  const safeFormulas = page.preview ? [] : (page.formulas ?? []).filter(isSafeMathML);
+  const formulasMarkup = safeFormulas.length
+    ? `<div class="mw-formulas" aria-label="提取公式">${safeFormulas.map(math => `<div class="mw-formula">${math}</div>`).join('')}</div>`
+    : '';
   let copy = '';
   if (page.text && page.preview) {
     copy = `<details class="mw-source-text"><summary>查看这页的原文</summary><p class="mw-extracted">${e(page.text)}</p></details>`;
@@ -51,7 +94,7 @@ function renderSource(version, page, e) {
     if (lines[0]?.trim() === title) lines.shift();
     const excerpt = lines.join('\n');
     if (excerpt) copy = `<p class="mw-extracted">${e(excerpt)}</p>`;
-    else if (!page.text && !figures) copy = '<p class="mw-muted">这页没有可读取的文字或图片。</p>';
+    else if (!page.text && !figures && !safeFormulas.length) copy = '<p class="mw-muted">这页没有可读取的文字或图片。</p>';
   }
   const sourceNote = figures ? '当前显示抽取的原文和可读取的插图。' : '当前按页显示抽取的原文。';
   return `<section class="mw-paper" aria-labelledby="mw-source-title">
@@ -61,6 +104,7 @@ function renderSource(version, page, e) {
     </div>
     ${page.preview ? `<img class="mw-preview" src="${e(page.preview)}" alt="${e(`原课件第 ${page.number} 页预览`)}">` : ''}
     ${copy}
+    ${formulasMarkup}
     ${figures}
     ${!page.preview && (page.text || figures) && version.type !== 'text' ? `<p class="mw-source-note">${sourceNote}</p>` : ''}
     ${page.warnings?.length ? `<details class="mw-source-text"><summary>这页的读取说明</summary><ul>${page.warnings.map(warning => `<li>${e(warning)}</li>`).join('')}</ul></details>` : ''}
@@ -70,14 +114,27 @@ function renderSource(version, page, e) {
 function joinLecture(version, adopted) {
   const supplements = new Map();
   const interactionsByPage = new Map();
+  const experimentsByPage = new Map();
   const sorted = [...adopted].sort((a, b) => (a.adoptedAt ?? 0) - (b.adoptedAt ?? 0));
   for (const { pageNumber, kind, packet } of sorted) {
     if (kind === 'classroom') interactionsByPage.set(pageNumber, packet.lesson ?? packet);
+    if (kind === 'experiment' && packet?.kind) {
+      experimentsByPage.set(pageNumber, { kind: packet.kind, ...(packet.params ? { params: packet.params } : {}) });
+    }
     if (!supplementKinds.includes(kind)) continue;
     if (!supplements.has(pageNumber)) supplements.set(pageNumber, { slides: [] });
     supplements.get(pageNumber).slides.push(...packet.slides);
   }
-  return buildLectureScore(version, supplements, { interactionsByPage });
+  return buildLectureScore(version, supplements, { interactionsByPage, experimentsByPage });
+}
+
+function downloadJsonFile(data, filename) {
+  const href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = href;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(href), 1000);
 }
 
 export function renderMaterialWorkspace(root, ctx) {
@@ -93,11 +150,12 @@ export function renderMaterialWorkspace(root, ctx) {
   let versionRequest = 0;
   const active = () => !stopped && root.isConnected;
 
-  root.innerHTML = `<div class="mw-workspace">
+  root.innerHTML = `<div class="mw-workspace" data-mw-dropzone>
     <header class="mw-heading">
       <div><h1>讲义备课</h1><p data-mw-heading-info>导入已有课件，按原页备课，在共演授课。</p></div>
       <div class="mw-actions mw-heading-actions">
         <button class="mw-button" type="button" data-mw-workshop>${icon('sparkles')}AI 备课工坊</button>
+        <button class="mw-button" type="button" data-mw-manage data-mw-lock>${icon('layers')}管理备课本</button>
         <select aria-label="最近打开的课件" data-mw-recent hidden></select>
         <button class="mw-button mw-primary" type="button" data-mw-start hidden>${icon('play')}在共演开始授课</button>
       </div>
@@ -107,25 +165,42 @@ export function renderMaterialWorkspace(root, ctx) {
     <div class="mw-body" data-mw-body></div>
     <div data-mw-workshop-host hidden></div>
     <input type="file" accept=".ppt,.pptx,.pdf,application/pdf" data-mw-file hidden>
+    <input type="file" accept=".json,application/json" data-mw-bundle-file hidden>
     <dialog class="mw-dialog" aria-labelledby="mw-paste-title" data-mw-paste>
       <form class="mw-form" data-mw-paste-form>
-        <h2 id="mw-paste-title">粘贴一页讲义</h2>
-        <label>标题<input name="title" maxlength="150" required></label>
-        <label>原文<textarea name="text" rows="8" required></textarea></label>
+        <h2 id="mw-paste-title">粘贴讲义内容</h2>
+        <p class="mw-muted">支持单页文本，也支持用单独一行的 <code>---</code> 或多段 <code># 标题</code> 自动拆分为多页讲义。</p>
+        <label>讲义名称 / 首页标题<input name="title" maxlength="150" required></label>
+        <label>正文内容<textarea name="text" rows="10" required placeholder="直接粘贴讲义文字，或用 --- 分隔不同页…"></textarea></label>
         <div class="mw-actions">
           <button class="mw-button" type="button" data-mw-paste-close>取消</button>
-          <button class="mw-button mw-primary" type="submit">打开这一页</button>
+          <button class="mw-button mw-primary" type="submit">导入讲义</button>
         </div>
       </form>
     </dialog>
+    <dialog class="mw-dialog mw-manage-dialog" aria-labelledby="mw-manage-title" data-mw-manage-dialog>
+      <div class="mw-manage-head">
+        <h2 id="mw-manage-title">管理本地备课本</h2>
+        <button type="button" class="mw-plain" data-mw-manage-close aria-label="关闭">${icon('close', 18)}</button>
+      </div>
+      <p class="mw-muted">可将备课本（含全部原页、批注、理科例题与互动课谱）导出为 <code>.polyphony-notebook.json</code>，跨设备或换教室电脑一键迁移。</p>
+      <div class="mw-actions mw-manage-top-actions">
+        <button type="button" class="mw-button mw-primary" data-mw-bundle-import>${icon('plus', 16)}导入备课包 (.json)</button>
+      </div>
+      <div class="mw-manage-list" data-mw-manage-list></div>
+    </dialog>
   </div>`;
   const find = selector => root.querySelector(selector);
+  const workspace = find('[data-mw-dropzone]');
   const body = find('[data-mw-body]');
   const status = find('[data-mw-status]');
   const recent = find('[data-mw-recent]');
   const start = find('[data-mw-start]');
   const fileInput = find('[data-mw-file]');
+  const bundleInput = find('[data-mw-bundle-file]');
   const pasteDialog = find('[data-mw-paste]');
+  const manageDialog = find('[data-mw-manage-dialog]');
+  const manageList = find('[data-mw-manage-list]');
   const workshopHost = find('[data-mw-workshop-host]');
 
   function tell(message = '', error = false) {
@@ -146,6 +221,24 @@ export function renderMaterialWorkspace(root, ctx) {
     recent.disabled = Boolean(operation);
   }
 
+  function renderManageList() {
+    if (!versions.length) {
+      manageList.innerHTML = '<p class="mw-muted">当前浏览器还没有已保存的备课本。</p>';
+      return;
+    }
+    manageList.innerHTML = `<ul class="mw-version-cards">${versions.map(item => `<li>
+      <div class="mw-version-info">
+        <strong>${e(item.name)}</strong>
+        <small>${item.pageCount ?? item.pageNumbers?.length ?? 0} 页 · ${e(item.type?.toUpperCase() || 'TEXT')}${version?.versionId === item.versionId ? ' · 当前打开' : ''}</small>
+      </div>
+      <div class="mw-actions">
+        <button type="button" class="mw-plain" data-manage-open="${e(item.versionId)}">打开</button>
+        <button type="button" class="mw-plain" data-manage-export="${e(item.versionId)}">${icon('download', 14)}导出</button>
+        <button type="button" class="mw-plain mw-danger-plain" data-manage-delete="${e(item.versionId)}">删除</button>
+      </div>
+    </li>`).join('')}</ul>`;
+  }
+
   function busy(name = '') {
     operation = name;
     root.querySelectorAll('[data-mw-lock], [data-mw-start], [data-mw-recent]').forEach(control => {
@@ -157,7 +250,10 @@ export function renderMaterialWorkspace(root, ctx) {
   async function refreshVersions() {
     try {
       versions = await notebook.listVersions();
-      if (active()) renderRecent();
+      if (active()) {
+        renderRecent();
+        if (manageDialog.open) renderManageList();
+      }
     } catch { /* The open deck remains usable without recent files. */ }
   }
 
@@ -205,6 +301,23 @@ export function renderMaterialWorkspace(root, ctx) {
       await notebook.savePageNote(versionId, pageNumber, note, { adopt });
       if (transientNotes.get(key) === next) transientNotes.delete(key);
     } catch { storeWarning(); }
+  }
+
+  async function seedSpeakerNotes(material) {
+    const withNotes = (material.pages ?? []).filter(item => typeof item.speakerNotes === 'string' && item.speakerNotes.trim());
+    if (!withNotes.length) return;
+    for (const item of withNotes) {
+      try {
+        const existing = await notebook.getPageNotes(material.versionId, item.number);
+        if (existing.some(entry => entry.kind === 'annotation')) continue;
+        await notebook.savePageNote(material.versionId, item.number, {
+          id: 'annotation',
+          kind: 'annotation',
+          packet: { text: item.speakerNotes.trim() },
+          source: { type: 'pptx-speaker-notes', pageNumber: item.number },
+        });
+      } catch { /* Ignore speaker note seed errors. */ }
+    }
   }
 
   function flushDrafts() {
@@ -277,18 +390,25 @@ export function renderMaterialWorkspace(root, ctx) {
   }
 
   function renderEmpty() {
+    version = undefined;
+    page = undefined;
+    start.hidden = true;
+    find('[data-mw-workshop]').hidden = false;
+    find('[data-mw-heading-info]').textContent = '导入已有课件，按原页备课，在共演授课。';
     body.innerHTML = `<section class="mw-empty" aria-labelledby="mw-empty-title">
       <div class="mw-empty-icon">${icon('workshop', 30)}</div>
       <h2 id="mw-empty-title">打开一份课件</h2>
-      <p>支持旧版 PowerPoint（.ppt）、.pptx 和 PDF。</p>
+      <p>支持旧版 PowerPoint（.ppt）、.pptx 和 PDF；也可以直接将课件或 <code>.polyphony-notebook.json</code> 备课包拖入此处。</p>
       <div class="mw-actions">
         <button class="mw-button mw-primary" type="button" data-mw-upload data-mw-lock>${icon('plus')}导入课件</button>
-        <button class="mw-button" type="button" data-mw-paste-open data-mw-lock>粘贴一页讲义</button>
+        <button class="mw-button" type="button" data-mw-paste-open data-mw-lock>粘贴讲义内容</button>
+        <button class="mw-button" type="button" data-mw-empty-bundle data-mw-lock>${icon('download')}导入备课包</button>
       </div>
       ${ctx.mode === 'server' ? '' : '<p class="mw-source-note">PDF 原页可通过启动共演本地服务导入。</p>'}
     </section>`;
     body.querySelector('[data-mw-upload]').onclick = () => fileInput.click();
     body.querySelector('[data-mw-paste-open]').onclick = () => pasteDialog.showModal();
+    body.querySelector('[data-mw-empty-bundle]').onclick = () => bundleInput.click();
   }
 
   async function openVersion(versionId, number) {
@@ -332,7 +452,7 @@ export function renderMaterialWorkspace(root, ctx) {
       ? ` · Jev 判读 ${plan.modelPages} 页，其余使用本地规则` : '';
     container.innerHTML = `<div class="mw-plan-heading">
         <div><h2 id="mw-plan-title">全课排课</h2>
-          <p>${plan ? e(`${planSources[plan.source] ?? planSources.local} · 检查了 ${plan.scannedPages} / ${plan.totalPages} 页${fallbackCount}`) : '从原课件中找适合补充讲解或加互动的页。'}</p></div>
+          <p>${plan ? e(`${planSources[plan.source] ?? planSources.local} · 检查了 ${plan.scannedPages} / ${plan.totalPages} 页${fallbackCount}`) : '从原课件中找适合补充讲解、概念辨析或加互动的页。'}</p></div>
         <button class="mw-button" type="button" data-mw-plan-request data-mw-lock>${icon('sparkles')}${plan ? '重新获取建议' : '获取排课建议'}</button>
       </div>
       ${plan && !available.length ? '<p class="mw-plan-feedback">没有匹配到适合加互动或理科讲解的页。可以按原课件授课，也可以逐页备课。</p>' : ''}
@@ -340,7 +460,7 @@ export function renderMaterialWorkspace(root, ctx) {
         <div><strong>${e(activityTitles[item.kind])}</strong><p>${e(item.reason)}</p></div>
         <div class="mw-actions">
           <button class="mw-plain" type="button" data-mw-suggestion-page="${index}" data-mw-lock>看第 ${item.pageNumber} 页</button>
-          <button class="mw-button" type="button" data-mw-suggestion="${index}" data-mw-lock>${item.kind === 'rc' ? '打开理科模板' : '添加到这一页'}</button>
+          <button class="mw-button" type="button" data-mw-suggestion="${index}" data-mw-lock>${item.kind === 'rc' ? '打开理科模板' : item.kind === 'inquiry' ? 'AI 生成本页互动' : '添加到这一页'}</button>
         </div>
       </li>`).join('')}</ul>` : ''}
       ${version.warnings?.length ? `<details class="mw-import-warnings"><summary>课件读取说明</summary><ul>${version.warnings.map(warning => `<li>${e(warning)}</li>`).join('')}</ul></details>` : ''}`;
@@ -372,6 +492,10 @@ export function renderMaterialWorkspace(root, ctx) {
         const sourcePage = target.pages.find(candidate => candidate.number === item.pageNumber);
         if (item.kind === 'rc') {
           goToPage(item.pageNumber, { tool: 'science', model: 'rc', focus: true });
+          return;
+        }
+        if (item.kind === 'inquiry') {
+          goToPage(item.pageNumber, { tool: 'classroom', focus: true });
           return;
         }
         const lesson = getLesson(item.kind);
@@ -453,6 +577,7 @@ export function renderMaterialWorkspace(root, ctx) {
           <div class="mw-actions" role="group" aria-label="逐页备课">
             <button class="mw-button" type="button" data-mw-tool="handout" data-mw-lock aria-expanded="false">${icon('plus')}补一页讲义</button>
             <button class="mw-button" type="button" data-mw-tool="science" data-mw-lock aria-expanded="false">${icon('lab')}理科模板</button>
+            <button class="mw-button" type="button" data-mw-tool="experiment" data-mw-lock aria-expanded="false">${icon('target')}挂载课堂实验</button>
             <button class="mw-button" type="button" data-mw-tool="classroom" data-mw-lock aria-expanded="false">${icon('sparkles')}备课堂互动</button>
           </div>
         </div>
@@ -507,7 +632,7 @@ export function renderMaterialWorkspace(root, ctx) {
     list.hidden = !adopted.length;
     list.innerHTML = adopted.map((note, index) => {
       const packet = note.adoption.packet;
-      const title = packet.lesson?.title ?? packet.title;
+      const title = packet.lesson?.title ?? packet.title ?? challengeNames[packet.kind] ?? noteLabels[note.kind];
       return `<li><span>${e(noteLabels[note.kind])} · <strong>${e(title)}</strong></span>
         <button class="mw-plain" type="button" aria-label="${e(`从授课移除「${title}」`)}" data-mw-withdraw="${index}" data-mw-lock>移除</button></li>`;
     }).join('');
@@ -533,6 +658,7 @@ export function renderMaterialWorkspace(root, ctx) {
       button.setAttribute('aria-expanded', String(button.dataset.mwTool === panel));
     });
     if (panel === 'handout') renderHandout(host);
+    if (panel === 'experiment') renderExperimentTool(host);
     if (panel === 'science') {
       const target = version;
       const sourcePage = page;
@@ -546,6 +672,51 @@ export function renderMaterialWorkspace(root, ctx) {
         },
       });
     }
+  }
+
+  function renderExperimentTool(host) {
+    const target = version;
+    const sourcePage = page;
+    const existing = notes.find(note => note.kind === 'experiment' && isAdopted(note))?.adoption?.packet;
+    const adoptedRc = notes.find(note => note.kind === 'science' && isAdopted(note) && note.adoption.packet?.model === 'rc')?.adoption?.packet;
+    const inheritedParams = adoptedRc?.parameters ?? existing?.params ?? rcDefaults;
+    const selectedKind = existing?.kind ?? 'rc';
+    host.innerHTML = `<form class="mw-form mw-exp-form" data-mw-exp-form>
+      <p class="mw-muted">为原稿第 ${sourcePage.number} 页显式挂载一项课堂现场实验，授课时可直接点击底部实验按钮启动。</p>
+      <div class="mw-exp-options">${experimentOptions.map(opt => `<label class="mw-exp-card">
+        <input type="radio" name="kind" value="${e(opt.kind)}"${opt.kind === selectedKind ? ' checked' : ''}>
+        <div><strong>${e(opt.title)}</strong><p>${e(opt.desc)}</p></div>
+      </label>`).join('')}</div>
+      <div class="mw-exp-rc-note" data-exp-rc-note${selectedKind === 'rc' ? '' : ' hidden'}>
+        <strong>RC 故障台参数：</strong>
+        R = ${e(inheritedParams.resistanceKohm)} kΩ，C = ${e(inheritedParams.capacitanceNf)} nF，V₀ = ${e(inheritedParams.initialV)} V，V∞ = ${e(inheritedParams.finalV)} V
+        ${adoptedRc ? '（已自动同步本页采用的理科模板参数）' : '（如需自定义参数，可先在「理科模板」调整并采用）'}
+      </div>
+      <div class="mw-actions"><button class="mw-button mw-primary" type="submit" data-mw-lock>${icon('check')}挂载到此页</button></div>
+    </form>`;
+    const form = host.querySelector('[data-mw-exp-form]');
+    const rcNote = form.querySelector('[data-exp-rc-note]');
+    form.onchange = () => {
+      rcNote.hidden = form.elements.kind.value !== 'rc';
+    };
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const kind = form.elements.kind.value;
+      const meta = experimentOptions.find(item => item.kind === kind);
+      if (!meta) return;
+      const packet = {
+        kind,
+        title: meta.title,
+        ...(kind === 'rc' ? { params: inheritedParams } : {}),
+      };
+      event.submitter.disabled = true;
+      try {
+        await adoptNote(target, sourcePage, 'experiment', packet);
+        if (version === target && page === sourcePage) tell(`已将「${meta.title}」挂载到第 ${sourcePage.number} 页。`);
+      } finally {
+        event.submitter.disabled = false;
+      }
+    };
   }
 
   function renderHandout(host) {
@@ -643,7 +814,21 @@ export function renderMaterialWorkspace(root, ctx) {
     const versionId = await makeMaterialVersionId({ name: file.name, bytes });
     let previous;
     try { previous = await notebook.getVersion(versionId); } catch { /* Reading the new deck still works. */ }
-    if (previous) return { material: previous, saved: true };
+    if (previous) {
+      // Upgrade offline-cached slides with server-rendered original previews when now online.
+      if (ctx.materialRendering && previous.type !== 'text' && previous.pages.some(item => !item.hidden && !item.preview)) {
+        try {
+          const rendered = await ctx.importMaterial(file);
+          const matchingPages = rendered?.pages?.length === previous.pages.length &&
+            rendered.pages.every((item, index) => item.number === previous.pages[index].number);
+          if (matchingPages) {
+            const upgraded = await notebook.updateDocumentPages(versionId, rendered.pages, rendered.warnings ?? previous.warnings);
+            return { material: upgraded, saved: true, upgraded: true };
+          }
+        } catch { /* Keep the cached notebook intact if rendering fails. */ }
+      }
+      return { material: previous, saved: true };
+    }
     let result;
     if (type === 'pptx') {
       let parsedInBrowser = true;
@@ -676,7 +861,24 @@ export function renderMaterialWorkspace(root, ctx) {
       result.warnings = ['旧版 PowerPoint 在此处按页显示抽取的原文。'];
       if (result.truncated) result.warnings.push('文件较大。部分原文或原页超出读取范围。');
     } else throw new Error('请启动共演本地服务，再导入 PDF。也可以粘贴其中一页的原文。');
-    return storeVersion(importedMaterial(result, type, file, versionId));
+    const saved = await storeVersion(importedMaterial(result, type, file, versionId));
+    if (saved.saved) await seedSpeakerNotes(saved.material);
+    return saved;
+  }
+
+  async function importNotebookFile(file) {
+    if (file.size > 64 * 1024 * 1024) throw new Error('备课包文件超过 64 MB 大小限制。');
+    let parsed;
+    try { parsed = JSON.parse(await file.text()); }
+    catch { throw new Error('无法解析 JSON 备课包文件。'); }
+    const imported = await notebook.importNotebook(parsed);
+    const loaded = await notebook.getVersion(imported.versionId);
+    if (!loaded) throw new Error('备课包导入后无法打开。');
+    return {
+      material: loaded,
+      saved: true,
+      message: `已导入备课包「${imported.name}」（${imported.pageCount} 页，${imported.noteCount} 条备课记录）。`,
+    };
   }
 
   async function storeVersion(material) {
@@ -694,10 +896,10 @@ export function renderMaterialWorkspace(root, ctx) {
     busy('import');
     tell('正在读取课件…');
     try {
-      const { material, saved } = await read();
+      const { material, saved, upgraded, message } = await read();
       if (!active()) return false;
       displayVersion(material, saved);
-      tell();
+      tell(message ?? (upgraded ? '已自动补齐高清原页预览，原有批注与备课记录完整保留。' : ''));
       void refreshVersions();
       return true;
     } catch (error) {
@@ -708,11 +910,113 @@ export function renderMaterialWorkspace(root, ctx) {
     }
   }
 
+  function handleIncomingFile(file) {
+    if (!file) return;
+    const ext = file.name.split('.').at(-1).toLowerCase();
+    if (ext === 'json') {
+      if (manageDialog.open) manageDialog.close();
+      void runImport(() => importNotebookFile(file));
+    } else {
+      void runImport(() => importFile(file));
+    }
+  }
+
   fileInput.onchange = () => {
     const [file] = fileInput.files;
     fileInput.value = '';
-    if (file) void runImport(() => importFile(file));
+    handleIncomingFile(file);
   };
+  bundleInput.onchange = () => {
+    const [file] = bundleInput.files;
+    bundleInput.value = '';
+    if (file) {
+      if (manageDialog.open) manageDialog.close();
+      void runImport(() => importNotebookFile(file));
+    }
+  };
+
+  let dragDepth = 0;
+  const onDragEnter = event => {
+    if (!event.dataTransfer?.types?.includes('Files')) return;
+    event.preventDefault();
+    dragDepth++;
+    workspace.classList.add('is-dragover');
+  };
+  const onDragOver = event => {
+    if (!event.dataTransfer?.types?.includes('Files')) return;
+    event.preventDefault();
+  };
+  const onDragLeave = () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) workspace.classList.remove('is-dragover');
+  };
+  const onDrop = event => {
+    event.preventDefault();
+    dragDepth = 0;
+    workspace.classList.remove('is-dragover');
+    const file = event.dataTransfer?.files?.[0];
+    if (file && !operation) handleIncomingFile(file);
+  };
+  workspace.addEventListener('dragenter', onDragEnter);
+  workspace.addEventListener('dragover', onDragOver);
+  workspace.addEventListener('dragleave', onDragLeave);
+  workspace.addEventListener('drop', onDrop);
+
+  find('[data-mw-manage]').onclick = async () => {
+    await refreshVersions();
+    renderManageList();
+    manageDialog.showModal();
+  };
+  find('[data-mw-manage-close]').onclick = () => manageDialog.close();
+  find('[data-mw-bundle-import]').onclick = () => bundleInput.click();
+  manageList.onclick = async event => {
+    const openBtn = event.target.closest('[data-manage-open]');
+    if (openBtn) {
+      manageDialog.close();
+      try { await openVersion(openBtn.dataset.manageOpen); tell(); }
+      catch (error) { tell(error?.message || '无法打开课件。', true); }
+      return;
+    }
+    const exportBtn = event.target.closest('[data-manage-export]');
+    if (exportBtn) {
+      const id = exportBtn.dataset.manageExport;
+      exportBtn.disabled = true;
+      try {
+        const bundle = await notebook.exportNotebook(id);
+        const safeName = (bundle.versionMeta?.name || 'notebook').replace(/[\\/:*?"<>|]/g, '_');
+        downloadJsonFile(bundle, `${safeName}.polyphony-notebook.json`);
+        ctx.toast('已导出备课包');
+      } catch (error) {
+        tell(error?.message || '导出备课包失败。', true);
+      } finally {
+        exportBtn.disabled = false;
+      }
+      return;
+    }
+    const deleteBtn = event.target.closest('[data-manage-delete]');
+    if (deleteBtn) {
+      const id = deleteBtn.dataset.manageDelete;
+      const meta = versions.find(item => item.versionId === id);
+      manageDialog.close();
+      const confirmed = await ctx.confirmDialog({
+        title: '删除本地备课本？',
+        message: `将永久删除「${meta?.name ?? id}」及其全部批注、补充讲义和互动课谱。建议删除前先导出备课包。`,
+        confirmLabel: '确认删除',
+        cancelLabel: '取消',
+        danger: true,
+      });
+      if (!confirmed) return;
+      try {
+        await notebook.deleteVersion(id);
+        if (version?.versionId === id) renderEmpty();
+        await refreshVersions();
+        ctx.toast('已删除本地备课本');
+      } catch (error) {
+        tell(error?.message || '删除备课本失败。', true);
+      }
+    }
+  };
+
   find('[data-mw-paste-close]').onclick = () => pasteDialog.close();
   find('[data-mw-paste-form]').onsubmit = async event => {
     event.preventDefault();
@@ -722,9 +1026,10 @@ export function renderMaterialWorkspace(root, ctx) {
     if (!title || !text) return;
     pasteDialog.close();
     const opened = await runImport(async () => {
+      const pages = parsePastedPages(title, text);
       const bytes = new TextEncoder().encode(`${title}\n${text}`);
       const versionId = await makeMaterialVersionId({ name: title, bytes });
-      return storeVersion({ name: title, title, versionId, type: 'text', pages: [{ number: 1, title, text, images: [] }] });
+      return storeVersion({ name: title, title, versionId, type: 'text', pages });
     });
     if (opened) form.reset();
   };
@@ -768,6 +1073,10 @@ export function renderMaterialWorkspace(root, ctx) {
   return () => {
     stopped = true;
     closePanels();
+    workspace.removeEventListener('dragenter', onDragEnter);
+    workspace.removeEventListener('dragover', onDragOver);
+    workspace.removeEventListener('dragleave', onDragLeave);
+    workspace.removeEventListener('drop', onDrop);
     document.removeEventListener('visibilitychange', onVisibilityChange);
     window.removeEventListener('pagehide', flushDrafts);
     void flushDrafts();
