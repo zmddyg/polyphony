@@ -1,0 +1,9 @@
+material-import-basic.ppt is an unmodified Apache POI test fixture.
+https://github.com/apache/poi/blob/trunk/test-data/slideshow/basic_test_ppt_file.ppt
+Git blob: af16393f44e0f315c212b60392e2bae2130987bc
+
+Apache POI
+Copyright 2003-2026 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (https://www.apache.org/).

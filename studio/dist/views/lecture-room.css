@@ -1,0 +1,7 @@
+.lecture-room {max-width:1500px;margin:auto;min-height:64vh;color:#172b4a;background:#f4f7fb}
+.lecture-room-bar,.lecture-pager,.lecture-backbar {display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 18px}
+.lecture-room-bar {justify-content:space-between}.lecture-room-bar b {display:block;font-size:1.15rem}.lecture-room-bar span {color:#4b5f78}.lecture-bar-actions{display:flex;gap:8px;flex-wrap:wrap}
+.lecture-pager {position:sticky;bottom:0;justify-content:center;background:#f4f7fbf5;border-top:1px solid #d4deea}.lecture-pager button,.lecture-bar-actions button,.lecture-backbar button{min-height:44px}.lecture-pager [data-lecture-action=next]{color:#fff;background:#2456c4;border-color:#2456c4}
+.lecture-room--stage {min-height:100vh;max-width:none;padding:0 clamp(12px,3vw,54px) 28px}.lecture-room--student {min-height:100vh;padding:0 min(4vw,28px) 24px}.lecture-ended {padding:clamp(32px,10vw,120px);text-align:center}.lecture-ended button{margin:6px}
+#surface:fullscreen{background:#f4f7fb;overflow:auto;width:100vw;height:100vh}.lecture-backbar{justify-content:space-between}
+@media(max-width:640px){.lecture-room-bar,.lecture-pager{padding:8px 0;gap:6px}.lecture-bar-actions{gap:4px}.lecture-room-bar button,.lecture-pager button{font-size:.85rem}.lecture-frame{border-radius:8px}}

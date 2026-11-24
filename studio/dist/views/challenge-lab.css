@@ -1,0 +1,86 @@
+.cx-shell {
+  --cx-ink:#172d40; --cx-muted:#4b6473; --cx-line:#cedde3; --cx-paper:#fff;
+  --cx-dark:#102a39; --cx-mint:#67e7cb; --cx-amber:#ffc375; --cx-accent:#09689a;
+  color:var(--cx-ink); font-family:var(--sans, "Segoe UI", "Microsoft YaHei UI", sans-serif);
+  container-type:inline-size; margin:0 auto; max-width:1260px;
+}
+.cx-shell *, .cx-shell *::before, .cx-shell *::after {box-sizing:border-box}
+.cx-heading {margin:0 0 20px}
+.cx-heading h2 {font-size:clamp(1.65rem,3.2vw,2.65rem); line-height:1.24; letter-spacing:-.035em; margin:0}
+.cx-heading p,.cx-copy,.cx-hint,.cx-summary,.cx-details p {line-height:1.65; overflow-wrap:anywhere}
+.cx-heading p {color:var(--cx-muted); margin:8px 0 0; font-size:1rem; max-width:55em}
+.cx-grid-layout {display:grid; grid-template-columns:minmax(0,1.48fr) minmax(270px,1fr); gap:clamp(12px,2vw,24px); align-items:start}
+.cx-instrument {margin:0; min-width:0; border-radius:14px; background:var(--cx-dark); color:#e5f3f8; overflow:hidden; padding:clamp(14px,2.3vw,26px)}
+.cx-instrument figcaption,.cx-meter,.cx-legend,.cx-readings {display:flex; align-items:center; justify-content:space-between; gap:12px}
+.cx-instrument figcaption {font-size:.91rem; font-weight:700; letter-spacing:.015em; border-bottom:1px solid #36505c; padding:0 0 15px}
+.cx-instrument figcaption span+span {color:#b4cbd2; font-size:.8rem; font-weight:500; text-align:right}
+.cx-chart,.cx-circuit {display:block; width:100%; height:auto; max-width:100%; color:#bdefe5}
+.cx-chart {margin:12px 0 6px}
+.cx-editable {cursor:crosshair; touch-action:none}
+.cx-grid path,.cx-blind-line {stroke:#375661; stroke-width:1; fill:none}
+.cx-axis {fill:#c4d7df; font:13px "Segoe UI",sans-serif}
+.cx-target,.cx-model {fill:none; stroke-linecap:round; stroke-linejoin:round; stroke-width:2.8}
+.cx-target {stroke:var(--cx-mint)}
+.cx-model {stroke:var(--cx-amber); stroke-dasharray:7 5}
+.cx-dot {fill:var(--cx-dark); stroke:#f6fbff; stroke-width:2.7}
+.cx-blind-line {stroke:#ffffffe0; stroke-dasharray:3 5}
+.cx-observed {fill:none; stroke:var(--cx-mint); stroke-width:2.2}
+.cx-legend {flex-wrap:wrap; justify-content:flex-start; gap:8px 17px; color:#d9e9ed; font-size:.79rem; padding-top:12px; border-top:1px solid #36505c}
+.cx-legend span {display:inline-flex; align-items:center; gap:7px}
+.cx-legend i {display:inline-block;width:20px; border-top:2.5px solid var(--cx-mint)}
+.cx-legend i.cx-legend-model {border-color:var(--cx-amber);border-top-style:dashed}
+.cx-legend i.cx-legend-dot {width:9px; height:9px; border:2px solid #fff; border-radius:50%}
+.cx-meter {border-top:1px solid #36505c; padding-top:14px; color:#cadde4; font-size:.88rem}
+.cx-meter strong {color:var(--cx-mint); font:650 clamp(1.2rem,2.6vw,2rem)/1.2 Consolas,"Microsoft YaHei UI",monospace}
+.cx-controls {background:var(--cx-paper); padding:clamp(15px,2.2vw,25px); border:1px solid var(--cx-line); border-radius:14px; min-width:0}
+.cx-controls h3 {font-size:clamp(1.15rem,2.1vw,1.45rem); margin:0 0 14px; line-height:1.35}
+.cx-controls button,.cx-controls select {font:inherit}
+.cx-controls button {cursor:pointer; min-height:42px; color:inherit}
+.cx-shell :is(button,select,input,summary):focus-visible {outline:3px solid #087dae; outline-offset:3px}
+.cx-choices {display:grid; gap:8px}
+.cx-choices button,.cx-choice-static {display:flex; justify-content:space-between; align-items:center; gap:8px; padding:11px 13px; border:1px solid var(--cx-line); background:#f6fafb; border-radius:8px; text-align:left; font-weight:600}
+.cx-choices button:hover,.cx-presets button:hover {border-color:var(--cx-accent)}
+.cx-choices button[aria-pressed=true],.cx-presets button[aria-pressed=true] {border-color:#4a93ac; background:#e6f4f6; color:#0b5465}
+.cx-choice-end {display:inline-flex; align-items:center; gap:7px; white-space:nowrap}
+.cx-count,.cx-picked {font-size:.8rem; color:var(--cx-muted); font-weight:550}
+.cx-hint {color:var(--cx-muted); margin:12px 0 0; font-size:.84rem}
+.cx-copy,.cx-summary {font-size:.94rem; margin:0 0 13px}
+.cx-summary {border-left:3px solid #359d96; padding:0 0 0 10px}
+.cx-summary b {display:block; margin-bottom:3px}
+.cx-presets {display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 13px}
+.cx-presets button,.cx-point-editor select {border:1px solid var(--cx-line); border-radius:7px; padding:5px 11px; background:white; color:var(--cx-ink)}
+.cx-controls .cx-presets button {min-height:36px; font-size:.88rem}
+.cx-controls .cx-primary {border:0; margin-top:5px; padding:10px 16px; border-radius:8px; color:#fff; background:#12628b; font-weight:650; line-height:1.45; width:100%}
+.cx-controls .cx-primary:hover {background:#0e4e70}
+.cx-details {margin:14px 0 0; border-top:1px solid var(--cx-line); padding:10px 0 0; font-size:.83rem; color:var(--cx-muted)}
+.cx-details summary {cursor:pointer; line-height:1.6}
+.cx-details p {margin:7px 0}
+.cx-details:has(+ .cx-primary) {margin-bottom:12px}
+.cx-point-editor {display:grid; gap:10px; padding:10px 3px}
+.cx-point-editor label,.cx-point-editor input {display:block}
+.cx-point-editor select {padding:5px 8px; margin-left:8px}
+.cx-point-editor input {width:100%; margin-top:8px; accent-color:#0c7c87}
+.cx-table {width:100%; border-collapse:collapse; font-size:.87rem; margin:12px 0}
+.cx-table :is(td,th) {border-bottom:1px solid var(--cx-line); padding:7px 4px; text-align:left}
+.cx-readings {margin:5px 0 15px; justify-content:flex-start}
+.cx-readings div {flex:1; padding:8px 11px; background:#eef5f6; border-radius:7px}
+.cx-readings dt {font-size:.8rem; color:var(--cx-muted)}
+.cx-readings dd {font:650 1.46rem/1.4 Consolas,monospace; margin:0; color:#0b6063}
+.cx-peer {margin:14px 0 0; padding:12px; border-radius:8px; background:#edf5fb; font-size:.9rem}
+.cx-peer p {margin:5px 0 0; line-height:1.55}
+.cx-peer-button {padding:6px 11px; margin-top:12px; border:1px solid #a4c4da; border-radius:7px; color:#165478; background:#f3f8fb}
+.cx-live {max-width:1300px; margin:auto; padding:12px clamp(10px,2.2vw,28px) 24px}
+.cx-live .lecture-backbar {padding:0 0 18px; color:#526477}
+.lecture-pager [data-lecture-action="experiment"][hidden] {display:none}
+.lab-tabs {flex-wrap:wrap}
+@container (width < 485px) {
+  .lab-tabs:has([data-lab-action="light"]) {display:grid; grid-template-columns:1fr 1fr}
+}
+@container (max-width:740px) {
+  .cx-grid-layout {grid-template-columns:1fr}
+  .cx-heading {margin-bottom:12px}
+  .cx-instrument {padding:13px}
+  .cx-chart {margin-top:4px}
+  .cx-axis {font-size:18px}
+  .cx-controls h3 {margin-bottom:11px}
+}

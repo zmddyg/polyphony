@@ -1,0 +1,56 @@
+.lecture-frame {
+  container-type: inline-size;
+  display: grid;
+  gap: clamp(16px, 2.4vw, 32px);
+  max-inline-size: 1320px;
+  min-inline-size: 0;
+  margin-inline: auto;
+  padding: clamp(20px, 3.75vw, 56px);
+  border: 1px solid var(--line, #dfe5f0);
+  border-radius: 16px;
+  color: var(--ink, #14213a);
+  background: var(--surface, #fff);
+  box-shadow: var(--shadow, 0 5px 16px #13234f06);
+  overflow-wrap: anywhere;
+}
+
+.lecture-frame-head { display: grid; gap: 8px; }
+.lecture-frame-head h2 {
+  margin: 0;
+  color: inherit;
+  font-size: clamp(1.6rem, 3.5vw, 3.6rem);
+  font-weight: 750;
+  line-height: 1.18;
+}
+.lecture-frame-source {
+  margin: 0;
+  color: var(--muted, #58677e);
+  font-size: clamp(.8rem, 1.15vw, 1rem);
+  line-height: 1.5;
+}
+.lecture-frame-layout, .lecture-frame-visual, .lecture-frame-figures { display: grid; gap: clamp(13px, 2vw, 25px); min-inline-size: 0; }
+.lecture-frame-original { margin: 0; border: 1px solid var(--line, #dfe5f0); border-radius: 9px; background: #f8fafc; overflow: hidden; }
+.lecture-frame-original > img, .lecture-frame-figures > img {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+  max-block-size: min(68svh, 840px);
+  object-fit: contain;
+}
+.lecture-frame-figures > img { max-block-size: min(60svh, 700px); }
+.lecture-frame-text { display: grid; gap: .66em; color: #25334d; font-size: clamp(1.08rem, 2.05vw, 2.12rem); line-height: 1.55; }
+.lecture-frame-text > p { margin: 0; white-space: pre-wrap; }
+.lecture-frame-transcript { color: var(--muted, #58677e); }
+.lecture-frame-transcript > summary { width: fit-content; cursor: pointer; font-weight: 645; }
+.lecture-frame-transcript[open] > summary { margin-block-end: 12px; }
+.lecture-frame-empty { margin: 0; color: var(--muted, #58677e); }
+
+.lecture-frame--compact { padding: clamp(16px, 4vw, 30px); gap: 14px; }
+.lecture-frame--compact .lecture-frame-head h2 { font-size: clamp(1.35rem, 4.4vw, 2rem); }
+.lecture-frame--compact .lecture-frame-text { font-size: clamp(1rem, 2.25vw, 1.25rem); }
+.lecture-frame--compact .lecture-frame-original > img,
+.lecture-frame--compact .lecture-frame-figures > img { max-block-size: 58svh; }
+
+@container (min-width: 680px) {
+  .lecture-frame-layout--split { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); align-items: start; }
+}

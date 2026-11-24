@@ -1,0 +1,6 @@
+.git
+.openai
+.polyphony-rooms.json*
+.env*
+node_modules
+*.log

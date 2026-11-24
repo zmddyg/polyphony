@@ -1,0 +1,9 @@
+{
+  "name": "polyphony-classroom-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "共演 Polyphony 跨学科实时课堂编排系统",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node server.mjs", "test": "node --test" }
+}
