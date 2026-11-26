@@ -175,16 +175,28 @@ export function renderReplay(root, ctx) {
   const keepBranchOpen = Boolean(root.querySelector('.pr-archive-branch')?.open);
   const responses = [...(state.responses ?? []),...(state.lectureArchive ?? []).flatMap(item=>item.responses)];
   const simulated = responses.filter(item => item.simulated).length;
-  const change = pairedChange(state);
-  const decision = state.decision;
-  const episode = Number(state.round) === 2 ? state : state.lectureArchive?.findLast(item => Number(item.round) === 2) ?? state;
+  const episode = Number(state.round) === 2 ? state
+    : state.lectureArchive?.findLast(item => Number(item.round) === 2) ?? state.lectureArchive?.at(-1) ?? state;
   const reportState = { ...state, ...episode };
+  const change = pairedChange(reportState);
+  const decision = reportState.decision;
   const versionId = episode.versionId ?? state.lecture?.sourceVersion;
   const pageNumber = episode.pageNumber ?? state.lecture?.pageNumber;
   const branchEvent = events.findLast(event => event.type === 'branch' && event.lessonStart === latest?.lessonStart && event.detail?.branchId === decision?.branchId);
+  const contrast = reportState.analysis?.contrastPair ?? reportState.firstRoundAnalysis?.contrastPair ?? [];
+  const mistake = contrast[0]?.quote;
   root.innerHTML = `<div class="pr-review">
-    <header class="pr-page-header"><div><h1>学情复盘</h1><p>查看教学节点、教学决定和关联作答。</p></div><div class="pr-page-actions"><button class="pr-button" id="replay-return" type="button">${icon('arrow-left', 16)}返回控制台</button><button class="pr-button pr-primary" id="replay-export" type="button"${events.length ? '' : ' disabled'}>${icon('download', 16)}导出记录</button></div></header>
-    <div class="pr-battle-layout">${renderCognitionReport(reportState, esc)}<aside class="pr-memory"><span>课后 → 下次备课</span><h2>让典型误区留在原页</h2><p>${versionId && pageNumber ? `已锚定原 PPT 第 ${esc(pageNumber)} 页。将本课匿名诊断与战报存入该页记忆。` : '当前为独立互动课例；从课件原页开课后可回流到对应页。'}</p><button type="button" class="pr-button pr-primary" data-replay-memory>将本课典型物理误区回流至原 PPT 页级记忆库</button><p data-memory-status role="status"></p></aside></div>
+    <header class="pr-page-header"><div><h1>课后复盘</h1><p>${esc(state.lecture?.title ?? state.lesson?.title ?? '课堂记录')}</p></div>
+      <button class="pr-button" id="replay-return" type="button">${icon('arrow-left', 16)}返回课堂</button></header>
+    <section class="pr-activity-summary" aria-label="本课结果">
+      <h2>本课作答</h2>
+      <p>${responses.length - simulated} 份学生作答${simulated ? ' · ' + simulated + ' 份模拟' : ''}${change ? ' · ' + change.changed + ' / ' + change.total + ' 人改答' : ''}</p>
+      ${mistake ? '<p><b>值得回看的理由</b> · '+esc(mistake)+'</p>' : ''}
+      ${versionId && pageNumber && episode.responses?.length ? `<button type="button" class="pr-button" data-replay-memory>将复盘保存到第 ${esc(pageNumber)} 页</button><p data-memory-status role="status"></p>` : ''}
+    </section>
+    <details class="pr-detail-toggle"><summary>查看完整记录</summary>
+    <div class="pr-detail-actions"><button class="pr-button" id="replay-export" type="button"${events.length ? '' : ' disabled'}>${icon('download', 16)}导出记录</button></div>
+    ${renderCognitionReport(reportState, esc)}
     <section class="pr-overview" aria-label="课堂概览">
       <div class="pr-class"><span class="pr-class-icon">${icon('book', 26)}</span><div><div class="pr-class-meta"><span>课堂码 <b>${esc(state.code ?? '')}</b></span><span>第 ${esc(state.round ?? 1)} 轮</span>${phaseLabels[state.phase] ? `<span class="pr-status${state.phase === 'closed' ? ' is-closed' : ''}">${phaseLabels[state.phase]}</span>` : ''}${state.demo ? '<span>模拟班级演示</span>' : ''}</div><h2>${esc(state.lesson?.title ?? '课堂存档')}</h2></div></div>
       <dl class="pr-stats"><div><dt>教学节点</dt><dd>${events.length}</dd></div><div><dt>本课真实作答</dt><dd>${responses.length - simulated}</dd></div><div><dt>本课模拟作答</dt><dd>${simulated}</dd></div></dl>
@@ -206,6 +218,7 @@ export function renderReplay(root, ctx) {
         ${decision && !branchEvent ? `<details class="pr-archive-branch"${keepBranchOpen ? ' open' : ''}><summary id="replay-branch-evidence">本课靶向教学策略的关联作答</summary>${citedResponses(decision.evidenceIds, state, true, ctx)}</details>` : ''}
       </section>
     </div>
+    </details>
   </div>`;
 
   const list = root.querySelector('.pr-timeline');
@@ -299,7 +312,7 @@ export function renderReplay(root, ctx) {
   before.onclick = () => step(-1, before);
   after.onclick = () => step(1, after);
   root.querySelector('#replay-return').onclick = () => ctx.go('desk');
-  root.querySelector('[data-replay-memory]').onclick = async event => {
+  root.querySelector('[data-replay-memory]')?.addEventListener('click', async event => {
     const button = event.currentTarget;
     const status = root.querySelector('[data-memory-status]');
     if (!versionId || !pageNumber) { status.textContent = '请在课件活化中打开原 PPT，在对应页开启互动后再回流。'; return; }
@@ -319,7 +332,7 @@ export function renderReplay(root, ctx) {
       ctx.toast('典型误区已回流并锚定原页');
       ctx.go('materials');
     } catch (error) { status.textContent = error.message; button.disabled = false; }
-  };
+  });
   root.querySelector('#replay-export').onclick = () => exportArchive(state);
   const findBranch = root.querySelector('#replay-find-branch');
   if (findBranch) findBranch.onclick = () => {

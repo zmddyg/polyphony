@@ -1,4 +1,4 @@
-import { pointerLesson, spaceLesson, gaussianLesson, mzmLesson, rcStepLesson, tflnLesson, ethicsLesson, privacyLesson } from './universal-lessons.mjs';
+import { pointerLesson, spaceLesson, gaussianLesson, mzmLesson, rcStepLesson, tflnLesson, ethicsLesson, privacyLesson } from '../dist/core/universal-lessons.mjs';
 import { COMBAT_DECKS, combatMaterial } from './combat-decks.mjs';
 export const DEMO_VERSION = 'sha256-5bf19c9eaa78270917f24d4e453df183a7544f46fe5c02c97e297ae83180ec56';
 export const tflnSource = 'https://opg.optica.org/col/abstract.cfm?uri=col-19-6-060010';

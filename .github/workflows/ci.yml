@@ -40,8 +40,11 @@ jobs:
       - name: Verify standalone exports
         working-directory: studio
         run: |
-          node tools/export-offline.mjs "$RUNNER_TEMP/demo.html"
-          node tools/export-offline.mjs --challenges "$RUNNER_TEMP/modules.html"
+          node tools/export-offline.mjs "$RUNNER_TEMP/platform.html"
+          node tools/export-offline.mjs --demo "$RUNNER_TEMP/demo.html"
+          cmp "$RUNNER_TEMP/platform.html" ../共演智课-离线平台.html
           cmp "$RUNNER_TEMP/demo.html" ../共演智课-单文件离线演示版.html
-          cmp "$RUNNER_TEMP/modules.html" ../共演智课-交互模组库独立版.html
+      - name: Verify the formal classroom and the separate demo in Chromium
+        if: matrix.node == 24
+        run: '"$RUNNER_TEMP/polyphony-browser/bin/python" studio/scripts/verify-clean-classroom.py'
 

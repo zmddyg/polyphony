@@ -16,15 +16,20 @@ export function lectureTakeaways(state) {
   return [...cards.values()].sort((a,b)=>a.pageNumber-b.pageNumber);
 }
 export function takeawayDrawerHtml(state,e) {
-  const cards=lectureTakeaways(state);
-  return `<details class="native-takeaways"><summary>📚 本堂已解锁考前速查卡 (${cards.length})</summary>${cards.length?cards.map(c=>`<article><h3>P${c.pageNumber} · ${e(c.title)}</h3><p>${e(c.formula??c.summary??'')}</p>${c.formula&&c.summary?'<p>'+e(c.summary)+'</p>':''}<p class="takeaway-pitfall">${e(c.pitfall??'')}</p></article>`).join(''):'<p>完成本页互动后，机制与避坑提示会留在这里。</p>'}</details>`;
+  const cards=lectureTakeaways(state).filter(card => card.summary || card.formula || card.pitfall);
+  if (!cards.length) return '';
+  return `<details class="native-takeaways"><summary>本课速查（${cards.length}）</summary>${cards.map(c => `<article>
+    <h3>第 ${c.pageNumber} 页 · ${e(c.title)}</h3><p>${e(c.formula ?? c.summary ?? '')}</p>
+    ${c.formula && c.summary ? '<p>'+e(c.summary)+'</p>' : ''}
+    ${c.pitfall ? '<p class="takeaway-pitfall">'+e(c.pitfall)+'</p>' : ''}
+  </article>`).join('')}</details>`;
 }
 export function inlineResultsHtml(state,e) {
   const report=cognitionReport(state),published=publicPhases.has(state.phase);
   const responses=(state.responses??[]).filter(r=>r.round===state.round);
   const count=state.responseCount??responses.length,simulated=state.simulatedResponseCount??responses.filter(r=>r.simulated).length;
   let html=`<div class="inline-live-count"><b>${count}</b> 份作答 · 第 ${state.round} 轮${simulated?` <span>含${simulated}份模拟</span>`:''}</div>`;
-  if(!published)return html+'<p class="inline-collecting">先独立判断，公布后一起检查机制。</p>';
+  if(!published)return html;
   if(state.lesson.activityId!=='step-fault@1')html+=`<div class="inline-distribution">${state.lesson.options.map(o=>{const n=responses.filter(r=>r.optionId===o.id).length;return `<div><span>${e(o.id)} · ${e(o.label)}</span><b>${n}</b><i style="width:${responses.length?n/responses.length*100:0}%"></i></div>`;}).join('')}</div>`;
   const first=state.responses?.filter(r=>r.round===1)??[];
   const correct=state.lesson.correctOptionId;
@@ -32,7 +37,7 @@ export function inlineResultsHtml(state,e) {
   const pair=state.analysis?.contrastPair??state.firstRoundAnalysis?.contrastPair??state.firstRoundContrastPair??(state.round===2&&correct&&initialWrong?.reason&&initialRight?.reason?[{sideLabel:'首轮直觉 · 待检验',quote:initialWrong.reason},{sideLabel:'首轮机制 · 原页证据',quote:initialRight.reason}]:null);
   if(state.analysis?.summary&&!pair?.length)html+='<p class="inline-analysis-note">'+e(state.analysis.summary)+'</p>';
   if(pair?.length)html+=`<div class="inline-reason-split">${pair.slice(0,2).map((p,i)=>`<article class="reason-${i?'blue':'red'}"><b>${e(p.sideLabel??'理由对照')}</b><p>${e(p.quote)}</p></article>`).join('')}</div>`;
-  if(state.round===2)html+=`<div class="inline-paired">二轮配对跃迁：${report.paired.changed} / ${report.paired.total} 人改变判断${report.paired.source==='simulated'?'（模拟）':''}${report.secondCorrect!=null?' · 本轮正确率 '+report.secondCorrect+'%':''}</div>`;
+  if(state.round===2)html+=`<div class="inline-paired">${report.paired.changed} / ${report.paired.total} 人改了答案${report.paired.source==='simulated'?'（模拟）':''}${report.secondCorrect!=null?' · 本轮正确率 '+report.secondCorrect+'%':''}</div>`;
   if(state.phase==='closed')html+=`<div class="inline-feedback"><b>${state.lesson.correctOptionId?'本页参考答案：'+e(state.lesson.correctOptionId):'本页没有唯一标准立场'}</b><p>${e(state.lesson.takeaway?.summary??state.lesson.moduleConfig?.takeaway?.summary??'请用证据检验原判断。')}</p></div>`;
   return html;
 }
@@ -40,6 +45,33 @@ function fullscreen(root,ctx) {
   if(document.fullscreenElement)return document.exitFullscreen().catch(()=>{});
   root.requestFullscreen?.().catch(()=>ctx.toast('浏览器未能进入全屏。'));
 }
+
+function presenterControls(ctx, active) {
+  const { state, esc } = ctx;
+  if (!active) return state.lecture.hasInteraction && state.lecture.mode === 'slides'
+    ? btn('interact', '开始互动', 'class="presenter-primary"') : '';
+  if (state.phase === 'closed') return '';
+
+  const peer = state.lesson.activityId === 'evidence-weighing@1'
+    ? btn('toggleAiPeer', state.aiPeerRevealed ? '收起 AI 辩友' : '展示 AI 辩友') : '';
+  if (state.phase === 'collect') {
+    return btn('reveal', '公布结果', 'class="presenter-primary"') +
+      (ctx.demonstration ? btn('demoFill', '模拟作答') : '') +
+      (peer ? `<details class="presenter-more"><summary>更多</summary><div>${peer}</div></details>` : '');
+  }
+
+  const branches = state.round === 1 ? state.lesson.branches : [];
+  const hasDiscussion = branches.length > 0;
+  const discussions = state.phase === 'branch' ? btn('revise','开始第二轮','class="presenter-primary"') :
+    hasDiscussion ? btn('discuss','讨论后再答','class="presenter-primary"') : '';
+  const choice = hasDiscussion ? `<label>讨论方向<select data-inline-branch>
+    ${branches.map(branch => `<option value="${esc(branch.id)}" ${branch.id === (state.decision?.branchId ?? state.analysis?.recommendedId) ? 'selected' : ''}>${esc(branch.title)}</option>`).join('')}
+    </select></label>${btn('branch','采用这个方向')}` : '';
+  const analysis = (state.responseCount ?? 0) > 0 ? btn('analyze','整理作答理由') : '';
+  return discussions + btn('close', '完成本页', discussions ? '' : 'class="presenter-primary"') +
+    (choice || analysis || peer ? `<details class="presenter-more"><summary>更多</summary><div>${choice}${analysis}${peer}</div></details>` : '');
+}
+
 export function renderLectureRoom(root,ctx,role) {
   const lecture=ctx.state.lecture,teacher=role==='teacher',student=role==='student',e=ctx.esc;
   const remote=teacher&&ctx.remote;
@@ -49,17 +81,33 @@ export function renderLectureRoom(root,ctx,role) {
     entry?.dispose?.();entry?.observer?.disconnect();
     entry={key,ctx,drafts:new Map()};players.set(root,entry);
     root.innerHTML=`<section data-native-player class="native-player native-player--${role}${remote?' native-player--remote':''}">
-      <header class="native-player-bar"><div><b>${e(lecture.title)}</b><p>${remote?'手机遥控':student?'同步放映中':'原生流式互动课件播放器'} · 第 ${lecture.index+1} / ${lecture.total} 页</p>${remote?'<p class="remote-page-title">'+e(lecture.filmstrip?.[lecture.index]?.title??'')+'</p>':''}</div><div>${remote?'<span data-remote-status role="status"></span>':(teacher?btn('stage','打开投影')+btn('invite','邀请学生'):'')+(!student?btn('fullscreen','全屏'):'')}</div></header>
-      <div class="native-canvas ${student?'native-mobile-card':''}" id="${student?'student':'stage'}"><div class="native-layout"><div data-native-slide><p role="status">正在载入授课页…</p></div><aside data-inline-widget class="native-inline" hidden aria-label="本页原生互动"></aside></div></div>
-      ${teacher?`<footer class="presenter-dock"><div class="presenter-pager">${btn('previous','◀ 上一页',lecture.index===0?'disabled':'')}<nav class="native-filmstrip" aria-label="课件缩略导航">${Array.from({length:lecture.total},(_,i)=>{const s=lecture.filmstrip?.[i];return `<button type="button" data-slide-index="${i}" aria-current="${i===lecture.index?'page':'false'}" title="${e(s?.title??'第'+(i+1)+'页')}"><span>${i+1}</span>${s?.activityId?'<small>'+e(names[s.activityId]??'互动')+'</small>':'<small>讲授</small>'}</button>`;}).join('')}</nav>${btn('next','下一页 ▶',lecture.index===lecture.total-1?'disabled':'')}</div><div data-presenter-controls class="presenter-controls"></div><div class="presenter-utility">${btn('finish','结束授课')}<span>← / → / PageUp / PageDown / Space 翻页 · 互动自动留档</span></div></footer>`:''}
-      ${role==='stage'?`<footer class="stage-filmstrip" aria-label="课件放映进度">${Array.from({length:lecture.total},(_,i)=>{const s=lecture.filmstrip?.[i];return `<span aria-current="${i===lecture.index?'page':'false'}"><b>${i+1}</b><small>${e(names[s?.activityId]??'讲授')}</small></span>`;}).join('')}</footer>`:''}
-      <div data-takeaway-drawer></div><p class="native-status" data-native-status role="status"></p></section>`;
+      <header class="native-player-bar"><div>${role==='stage'?'':'<b>'+e(lecture.title)+'</b>'}
+        <p>第 ${lecture.index+1} / ${lecture.total} 页${ctx.demonstration ? ' · 演示课堂' : ''}</p>
+        ${remote?'<p class="remote-page-title">'+e(lecture.filmstrip?.[lecture.index]?.title??'')+'</p>':''}
+      </div><div>${remote?'<span data-remote-status role="status"></span>':
+        (teacher?btn('stage','打开投影')+btn('invite','邀请学生')+
+          `<details class="presenter-more"><summary>更多</summary><div>
+            ${ctx.remotePair ? btn('remote','手机遥控') : ''}${btn('fullscreen','全屏')}${btn('finish','结束上课')}
+          </div></details>` : !student ? btn('fullscreen','全屏') : '')}</div></header>
+      <div class="native-canvas ${student?'native-mobile-card':''}" id="${student?'student':'stage'}"><div class="native-layout"><div data-native-slide><p role="status">正在载入课件…</p></div><aside data-inline-widget class="native-inline" hidden aria-label="本页互动"></aside></div></div>
+      ${teacher?`<footer class="presenter-dock"><div class="presenter-pager">
+        ${btn('previous','上一页',lecture.index===0?'disabled':'')}
+        <select data-lecture-page aria-label="跳转到课件页">
+          ${Array.from({length:lecture.total}, (_, i) => `<option value="${i}" ${i===lecture.index?'selected':''}>第 ${i+1} 页${lecture.filmstrip?.[i]?.activityId?' · 互动':''}</option>`).join('')}
+        </select>
+        ${btn('next','下一页',lecture.index===lecture.total-1?'disabled':'')}
+      </div><div data-presenter-controls class="presenter-controls"></div></footer>`:''}
+      ${student?'<div data-takeaway-drawer></div>':''}</section>`;
     const execute=async(type,payload={})=>{
       if(entry.busy)return null;entry.busy=true;
       try{return await entry.ctx.command(type,payload);}catch(error){entry.ctx.toast(error.message);return null;}finally{entry.busy=false;}
     };
     entry.execute=execute;
-    root.querySelectorAll('[data-slide-index]').forEach(b=>b.onclick=()=>execute('lectureNavigate',{index:Number(b.dataset.slideIndex)}));
+    const pageSelect = root.querySelector('[data-lecture-page]');
+    if (pageSelect) pageSelect.onchange = async () => {
+      const changed = await execute('lectureNavigate',{index:Number(pageSelect.value)});
+      if (!changed) pageSelect.value = String(entry.ctx.state.lecture.index);
+    };
     root.addEventListener('click',entry.listener=event=>{
       if(players.get(root)!==entry)return;
       const action=event.target.closest('[data-inline-action]')?.dataset.inlineAction;
@@ -67,12 +115,16 @@ export function renderLectureRoom(root,ctx,role) {
       const c=entry.ctx,s=c.state,l=s.lecture;
       if(action==='stage')return c.open('stage');
       if(action==='invite')return c.invite();
+      if(action==='remote')return c.remotePair?.();
+      if(action==='review')return c.go('replay');
       if(action==='fullscreen')return fullscreen(root,c);
       if(action==='previous'||action==='next')return execute('lectureNavigate',{index:l.index+(action==='next'?1:-1)});
       if(action==='finish')return execute('lectureFinish');
       if(action==='interact')return execute('lectureInteract');
+      if(action==='discuss')return execute('branch',{branchId:s.analysis?.recommendedId ?? s.lesson.branches[0].id});
       if(action==='branch')return execute('branch',{branchId:root.querySelector('[data-inline-branch]').value});
       if(action==='retry'){entry.failed=false;entry.framePending=false;return loadFrame();}
+      if(action==='demoFill'&&!c.demonstration)return;
       if(['demoFill','reveal','analyze','revise','close','toggleAiPeer'].includes(action))return execute(action);
     });
     entry.dispose=()=>root.removeEventListener('click',entry.listener);
@@ -117,7 +169,8 @@ export function renderLectureRoom(root,ctx,role) {
   }
   const shell=root.querySelector('[data-native-player]');
   if(lecture.mode==='ended') {
-    shell.innerHTML=`<section class="lecture-ended"><h1>本节课已结束</h1><p>${e(lecture.title)}</p>${takeawayDrawerHtml(ctx.state,e)}</section>`;
+    shell.innerHTML=`<section class="lecture-ended"><h1>本节课已结束</h1><p>${e(lecture.title)}</p>
+      ${teacher&&!remote?btn('review','查看复盘','class="action-primary"'):student?takeawayDrawerHtml(ctx.state,e):''}</section>`;
     return;
   }
   if(!remote)loadFrame();
@@ -136,12 +189,20 @@ export function renderLectureRoom(root,ctx,role) {
   else if(experiment)renderChallenge(widget,ctx.state.experiment,{role,turn:lecture.turn,action:p=>command('lectureExperimentAct',p),vote:choice=>command('experimentVote',{choice}),askPeer:ctx.askPeer,report:ctx.toast});
   const controls=root.querySelector('[data-presenter-controls]');
   if(controls) {
-    const s=ctx.state;
-    controls.innerHTML=active?`${btn('demoFill','注入模拟作答',s.phase!=='collect'?'disabled':'')}${btn('reveal','公布本页结果',s.phase!=='collect'?'disabled':'')}${btn('analyze','整理理由对撞',!['reveal','branch'].includes(s.phase)?'disabled':'')}${s.round===1&&['reveal','branch'].includes(s.phase)?`<label>选择教学分支<select data-inline-branch>${s.lesson.branches.map(b=>`<option value="${e(b.id)}" ${b.id===s.decision?.branchId?'selected':''}>${e(b.title)}</option>`).join('')}</select></label>${btn('branch','采用教学分支')}${btn('revise','开启二轮',s.phase!=='branch'?'disabled':'')}`:''}${s.lesson.activityId==='evidence-weighing@1'?btn('toggleAiPeer',s.aiPeerRevealed?'收起 AI 辩友':'亮出 AI 辩友'):''}${btn('close','完成本页互动',!['reveal','branch'].includes(s.phase)?'disabled':'')}`:lecture.hasInteraction?btn('interact','开启本页互动 · 同页融合'):'';
+    const html = presenterControls(ctx, active);
+    if (html !== entry.controlsHtml) {
+      entry.controlsHtml = html;
+      const wasOpen = controls.querySelector('details[open]');
+      controls.innerHTML = html;
+      if (wasOpen && controls.querySelector('details')) controls.querySelector('details').open = true;
+    }
   }
   const drawer=root.querySelector('[data-takeaway-drawer]');
-  const drawerOpen=drawer.querySelector('details')?.open;drawer.innerHTML=takeawayDrawerHtml(ctx.state,e);if(drawerOpen)drawer.querySelector('details').open=true;
-  root.querySelector('[data-native-status]').textContent=active?'同页原生融合态 · '+phaseNames[ctx.state.phase]+' · 翻页会保存本页状态':'';
+  if (drawer) {
+    const drawerOpen = drawer.querySelector('details')?.open;
+    drawer.innerHTML = takeawayDrawerHtml(ctx.state,e);
+    if (drawerOpen && drawer.querySelector('details')) drawer.querySelector('details').open = true;
+  }
   if(remote)return;
   // Fit synchronously too: background teacher/stage tabs throttle animation frames.
   fitContent();
@@ -159,11 +220,17 @@ function paintInteraction(host,entry,role) {
   const signature=JSON.stringify([state.phase,state.round,state.responses,state.responseCount,state.analysis,state.aiPeerRevealed,Boolean(participant),state.decision]);
   if(entry.widgetSignature===signature)return;entry.widgetSignature=signature;
   const collecting=state.phase==='collect';
+  const reasons=lesson.quickReasons??lesson.moduleConfig?.quickReasons??[];
+  const reasonOpen=host.querySelector('[data-extra-reason]')?.open || focusName==='reason';
   host.innerHTML=`<div class="inline-content"><header class="inline-heading"><span>${e(names[lesson.activityId]??'课堂互动')}</span><b>${phaseNames[state.phase]} · R${state.round}</b></header><p class="inline-prompt">${e(state.revisionPrompt??lesson.prompt)}</p>
     ${moduleHtml(lesson,state,{selectable:student&&collecting&&Boolean(participant),selectedId:draft.optionId})}
     ${!student&&collecting&&lesson.activityId!=='step-fault@1'?'<div class="inline-choice-list">'+lesson.options.map(o=>'<div><b>'+e(o.id)+'</b> '+e(o.label)+'</div>').join('')+'</div>':''}
-    ${student&&collecting?participant?`<form data-inline-response><div class="inline-options">${lesson.activityId==='step-fault@1'?'':lesson.options.map(o=>`<label><input type="radio" name="optionId" value="${e(o.id)}" ${draft.optionId===o.id?'checked':''} required><span>${e(o.label)}</span></label>`).join('')}</div><div class="inline-capsules" aria-label="三秒理由">${(lesson.quickReasons??lesson.moduleConfig?.quickReasons??[]).map((r,i)=>`<button type="button" data-reason="${i}" aria-pressed="${draft.reason===r}">${e(r)}</button>`).join('')}</div><label class="inline-reason">我的理由（可点选或补充）<textarea name="reason" rows="2" maxlength="1000">${e(draft.reason)}</textarea></label><button class="inline-submit">${mine?'更新本轮判断':'提交本轮判断'}</button>${mine?'<p class="inline-submitted">✓ 已提交；公布前可修改</p>':''}</form>`:`<form data-inline-join><label>课堂显示名<input name="name" value="${e(draft.name)}" required maxlength="48" autocomplete="nickname"></label><button class="inline-submit">加入课堂并在本页作答</button></form>`:''}
-    ${inlineResultsHtml(state,e)}${student&&!collecting&&mine?'<p class="inline-my-answer">我的本轮判断：'+e(mine.optionId)+' · '+e(mine.reason)+'</p>':''}${state.decision?'<p class="inline-branch">教学分支：'+e(state.decision.title)+'</p>':''}</div>`;
+    ${student&&collecting?participant?`<form data-inline-response><div class="inline-options">${lesson.activityId==='step-fault@1'?'':lesson.options.map(o=>`<label><input type="radio" name="optionId" value="${e(o.id)}" ${draft.optionId===o.id?'checked':''} required><span>${e(o.label)}</span></label>`).join('')}</div>
+      ${reasons.length?`<div class="inline-capsules" aria-label="选择理由">${reasons.map((reason,i)=>`<button type="button" data-reason="${i}" aria-pressed="${draft.reason===reason}">${e(reason)}</button>`).join('')}</div>`:''}
+      <details data-extra-reason ${reasonOpen||!reasons.length?'open':''}><summary>补充理由</summary><label class="inline-reason"><span class="visually-hidden">你的理由</span><textarea name="reason" rows="2" maxlength="1000">${e(draft.reason)}</textarea></label></details>
+      <button class="inline-submit">${mine?'更新答案':'提交'}</button>${mine?'<p class="inline-submitted">已提交，公布前可修改。</p>':''}</form>`
+      :`<form data-inline-join><label>课堂显示名<input name="name" value="${e(draft.name)}" required maxlength="48" autocomplete="nickname"></label><button class="inline-submit">加入并作答</button></form>`:''}
+    ${student&&collecting?'':inlineResultsHtml(state,e)}${student&&!collecting&&mine?'<p class="inline-my-answer">我的答案 · '+e(mine.optionId)+' · '+e(mine.reason)+'</p>':''}${state.decision?'<p class="inline-branch">讨论方向 · '+e(state.decision.title)+'</p>':''}</div>`;
   bindModule(host,lesson,{command:entry.execute});
   host.querySelectorAll('[data-step-select]').forEach(b=>b.onclick=()=>{draft.optionId=b.dataset.stepSelect;host.querySelectorAll('[data-step-select]').forEach(s=>s.setAttribute('aria-pressed',String(s===b)));});
   host.querySelectorAll('[name=optionId]').forEach(input=>input.onchange=()=>{draft.optionId=input.value;});

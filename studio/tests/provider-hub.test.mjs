@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { createPageModule } from '../dist/core/deck-harness.mjs';
-import { createDemoMaterial } from '../dist/core/demo-lesson.mjs';
+import { createDemoMaterial } from '../demo/demo-lesson.mjs';
 import { createRoom, reduceRoom } from '../dist/core/engine.mjs';
 import { projectRoom } from '../dist/core/transport.mjs';
 import { ethicsLesson, pointerLesson } from '../dist/core/universal-lessons.mjs';

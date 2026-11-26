@@ -1,4 +1,5 @@
 import { createRoom, initialLessonState, recordRoomEvent, reduceRoom } from './engine.mjs';
+import { WORKSPACE_LESSON_ID } from './catalog.mjs';
 import { lectureFrame, locateLectureFrame } from './lecture-score.mjs';
 import { advanceChallenge, castVote, challengeNames, newChallenge, publicChallenge } from './challenge-lab.mjs';
 import { challengeForFrame } from './lecture-planner.mjs';
@@ -19,7 +20,7 @@ function position(score, index, total) {
 
 // The immutable score is kept separate from the small room snapshots sent over SSE.
 export function createLectureRoom(code, score, at = Date.now()) {
-  const base = createRoom({code, demo:false, at});
+  const base = createRoom({code, lessonId:WORKSPACE_LESSON_ID, demo:false, at});
   const total = score.pages.reduce((count, page) => count + 1 + page.adopted.length, 0);
   const lecture = { title: score.title, sourceName: score.source.name, sourceVersion: score.source.versionId || '',
     mode: 'slides', turn: 0, filmstrip:score.pages.flatMap(p=>[{title:p.title,pageNumber:p.number,activityId:p.interaction?.activityId??null},...p.adopted.map(s=>({title:s.title,pageNumber:p.number,activityId:p.interaction?.activityId??null}))]), ...position(score, 0, total) };

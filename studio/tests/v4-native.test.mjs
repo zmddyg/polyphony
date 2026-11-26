@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {COMBAT_DECKS,combatMaterial,blockText} from '../dist/core/combat-decks.mjs';
+import {COMBAT_DECKS,combatMaterial,blockText} from '../demo/combat-decks.mjs';
 import {runDeckHarness,generateNativeDeck,createPageModule,NATIVE_DECK_SCHEMA,dryRunLesson} from '../dist/core/deck-harness.mjs';
 import {validateLectureScore,buildLectureScore,lectureFrame,validateSlideBlocks} from '../dist/core/lecture-score.mjs';
 import {createLectureRoom,applyRoomCommand} from '../dist/core/lecture-room.mjs';
@@ -47,9 +47,9 @@ test('navigation archives an in-progress inline activity, rejects stale submissi
   assert.equal(projectRoom(room,'student','student').lectureArchive,undefined);assert.equal(projectRoom(room,'student','student').lectureTakeaways.length,0);
   send('lectureNavigate',{index:3});send('lectureInteract');assert.equal(room.responses[0].optionId,'B');
   send('reveal');send('analyze');send('branch',{branchId:room.lesson.branches[0].id});send('revise');send('respond',{participantId:'student',optionId:'A',reason:'sizeof(*p)才是步长'});send('reveal');send('close');
-  assert.match(inlineResultsHtml(room,esc),/二轮配对跃迁：1 \/ 1/);
+  assert.match(inlineResultsHtml(room,esc),/1 \/ 1 人改了答案/);
   send('lectureNavigate',{index:6});send('lectureInteract');assert.equal(room.lectureArchive.length,1);assert.equal(room.lesson.id,'harness-p7');
-  const mobile=projectRoom(room,'student','student');assert.match(takeawayDrawerHtml(mobile,esc),/速查卡 \(1\)/);assert.doesNotMatch(JSON.stringify(mobile.lectureTakeaways),/小林|8B是步长/);
+  const mobile=projectRoom(room,'student','student');assert.match(takeawayDrawerHtml(mobile,esc),/本课速查（1）/);assert.doesNotMatch(JSON.stringify(mobile.lectureTakeaways),/小林|8B是步长/);
   send('lectureNavigate',{index:3});send('lectureInteract');assert.equal(room.phase,'closed');assert.equal(room.responses.length,2);assert.throws(()=>send('respond',{participantId:'student',optionId:'B'}),/阶段/);
   send('lectureFinish');assert.equal(room.lecture.mode,'ended');assert.equal(room.lectureArchive.length,2);
 });
@@ -63,7 +63,8 @@ test('all navigation keys work in slides and activity modes without intercepting
 
 test('offline native generation supports three preset scales and arbitrary topic decomposition with real receipts',async()=>{
   for(const [course,topic] of [['C语言','指针'],['物理光学','衍射与干涉'],['大学英语','Hedging与思辨'],['大一线性代数','四个子空间；可解性'],['专业课','相变条件；测量证据']])for(const pageCount of [8,10,12]){
-    const r=await generateNativeDeck({course,topic,pageCount});assert.equal(r.lectureScore.pages.length,pageCount);assert.equal(r.source,'local');assert.match(r.generationNote,/本地结构化生成/);
+    const r=await generateNativeDeck({course,topic,pageCount});assert.equal(r.lectureScore.pages.length,pageCount);assert.equal(r.source,'local');assert.match(r.generationNote,/本地生成的备课框架/);
+    assert.equal(r.lectureScore.source.name,course); assert.ok(r.lectureScore.title.includes(topic.split('；')[0]));
     assert(r.harnessReceipt.dryRuns.length>=2&&r.harnessReceipt.dryRuns.length<=3);assert(r.harnessReceipt.stages.every(s=>s.status==='complete'));assert(r.lectureScore.pages.every(p=>p.blocks.length));
   }
   await assert.rejects(generateNativeDeck({course:'',topic:'x'}),/填写/);await assert.rejects(generateNativeDeck({course:'x',topic:'y',pageCount:25}),/8–12/);

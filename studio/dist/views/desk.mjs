@@ -161,7 +161,7 @@ export function renderDesk(root, ctx) {
   const winnerSimulated = winner?.simulated ?? participants.some((person) => person.id === winner?.id && person.simulated);
   const roundLabel = `第 ${round} 轮`;
   const canChoose = round === 1 && phase === 'reveal';
-  const canFill = phase === 'collect' && !simulatedResponses;
+  const canFill = ctx.demonstration && phase === 'collect' && !simulatedResponses;
   const decisionBranch = lesson.branches.find((branch) => branch.id === decision?.branchId);
   const canOpenExperiment = scene === 'mzi' && decisionBranch?.id === 'energy';
   const primary = primaryAction(state, submitted);

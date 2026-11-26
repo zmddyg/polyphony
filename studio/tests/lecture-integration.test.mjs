@@ -57,7 +57,8 @@ test('HTTP and SSE carry an imported binary PPT through teaching, answering, ret
     const generated=await http(prep+'/author-deck',{spec},prepCookie);
     assert.equal(generated.status,200);assert.equal(generated.data.lectureScore.pages.length,8);
     assert(generated.data.harnessReceipt.stages.every(s=>s.status==='complete'));
-    assert.equal(generated.data.harnessReceipt.dryRuns.length,3);
+    assert.equal(generated.data.harnessReceipt.dryRuns.length,2);
+    assert.equal(generated.data.lectureScore.title,'C语言 · 指针与函数传址');
     assert.equal((await http(prep+'/author-deck',{spec:{...spec,pageCount:30}},prepCookie)).status,400);
   });
   await t.test('a teacher can use Jev page planning without a chat model', async subtest => {

@@ -17,7 +17,7 @@ const sha256Constants = new Uint32Array([
 const rotate = (value, bits) => (value >>> bits) | (value << (32 - bits));
 
 // Web Crypto is unavailable when the classroom server is opened over HTTP on a LAN.
-function sha256WithoutWebCrypto(bytes) {
+export function sha256WithoutWebCrypto(bytes) {
   const hash = new Uint32Array([
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
     0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
@@ -321,6 +321,10 @@ export function createMaterialNotebook({ indexedDB, databaseName = defaultDataba
         if (existing) {
           const document = await readRequest(documents.get(versionId));
           if (!document) throw new Error('已保存的课件无法打开。');
+          if (Object.hasOwn(input, 'draft')) {
+            document.draft = input.draft;
+            await readRequest(documents.put(document));
+          }
           const version = { ...existing, openedAt };
           await readRequest(versions.put(version));
           return { ...document, ...version };

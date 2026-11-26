@@ -1,8 +1,7 @@
 import { MODULE_MANIFESTS, validateModulePayload } from './activities.mjs';
 import { compileExpression } from './safe-expr.mjs';
 import { createRoom, reduceRoom } from './engine.mjs';
-import { buildLectureScore, validateSlideBlocks } from './lecture-score.mjs';
-import { COMBAT_DECKS, combatMaterial, blockText } from './combat-decks.mjs';
+import { blockText, buildLectureScore, validateSlideBlocks } from './lecture-score.mjs';
 import { makeMaterialVersionId } from './material-notebook.mjs';
 import { describeLessonProvider, requestStructuredCompletion } from './lesson-provider.mjs';
 
@@ -245,25 +244,12 @@ const nativeSpec=spec=>{
   return {course,topic,pageCount,pacingMode:spec.pacingMode??'stem-60s'};
 };
 function localNativeMaterial(spec) {
-  const text=spec.course+' '+spec.topic;
-  const id=/指针|C语言|C语言|\bC\s*(?:programming|语言)|pointer/iu.test(text)?'deck-c-pointers':/光学|电光|干涉|衍射|optics/iu.test(text)?'deck-optics':/英语|hedging|English/iu.test(text)?'deck-english-seminar':null;
-  if(id) {
-    const material=combatMaterial(id);
-    // Preserve all three verified checkpoints and the bookends when reducing a preset.
-    while(material.pages.length>spec.pageCount){const index=material.pages.findLastIndex((p,i)=>i>0&&i<material.pages.length-1&&!p.showcaseLesson);material.pages.splice(index,1);}
-    while(material.pages.length<spec.pageCount)material.pages.splice(-1,0,{number:0,title:'迁移练习：检验条件与机制',text:spec.topic,blocks:[bulletsForSpec(spec)],images:[]});
-    material.pages.forEach((p,i)=>{p.number=i+1;});
-    material.generationNote='本地结构化生成 · 配置模型 API 可解锁任意课题深度生成；已匹配 '+COMBAT_DECKS.find(d=>d.id===id).label;
-    return material;
-  }
   const topics=spec.topic.split(/[\n；;。]+/u).map(t=>t.trim()).filter(Boolean);
-  const linear=/线性代数|linear algebra/iu.test(text);
-  const material={name:spec.course,title:spec.course+' · '+topics[0].slice(0,60),type:'native',showcaseId:'native-local',generationNote:'本地结构化生成 · 配置模型 API 可解锁任意课题深度生成',pages:[]};
+  if (!topics.length) topics.push(spec.topic);
+  const material={name:spec.course,title:spec.course+' · '+topics[0].slice(0,60),type:'native',showcaseId:'native-local',generationNote:'本地生成的备课框架，讲授内容与例题请核对补充。',pages:[]};
   for(let i=0;i<spec.pageCount;i++) {
     const topic=topics[Math.max(0,i-1)%topics.length];
-    const blocks=i===0?[{type:'bullets',title:'本讲目标',items:topics.slice(0,6)},{type:'callout',title:'本地备课草稿',text:'以下为按主题拆解的结构化讲授框架。具体结论、例题与推导需由教师补充核对。',tone:'warning'}]:linear?[
-      {type:'formula',title:'线性映射与四个子空间',items:['A∈ℝᵐˣⁿ，rank(A)=r','dim Col(A)=dim Row(A)=r','dim Null(A)=n−r；dim Null(Aᵀ)=m−r']},
-      {type:'table',title:topic,headers:['问题','检查方法'],rows:[['Ax=b 可解？','检查b是否属于Col(A)'],['解是否唯一？','检查Null(A)是否只有零向量'],['矩形矩阵能否谈可逆？','通常须先明确方阵与满秩条件']]}]:[
+    const blocks=i===0?[{type:'bullets',title:'本讲目标',items:topics.slice(0,6)},{type:'callout',title:'备课草稿',text:'具体结论、例题与推导请由教师核对补充。',tone:'warning'}]:[
       {type:'steps',title:topic,items:['明确“'+topic+'”中的对象与术语。','列出使用结论所需的条件。','用一个具体例子检验条件，再比较一个反例。']},
       {type:'table',title:'课堂推理工作表',headers:['环节','教师 / 学生填写'],rows:[['原始命题',topic],['依据','补充教材原文、可重复实验或计算'],['适用边界','指出一个条件不满足的情形']]},
       {type:'callout',title:'待核对内容',text:'本地框架没有可验证的外部教材来源；不得把该框架视作已核实的学科结论。',tone:'warning'},
@@ -276,8 +262,6 @@ function localNativeMaterial(spec) {
   }
   return material;
 }
-function bulletsForSpec(spec){return {type:'steps',title:'独立迁移练习',items:[spec.topic.slice(0,500),'写出一条能够检验结论的证据。','说明哪些条件改变会推翻原来的判断。']};}
-
 export async function generateNativeDeck(input,options={}) {
   const spec=nativeSpec(input),{provider={},signal,onStage}=options;
   const receipt={version:'polyphony.harness@1',authoring:'native',spec,source:'provider',stages:HARNESS_STAGES.map(s=>({...s,status:'pending'})),repairs:[],dryRuns:[]};

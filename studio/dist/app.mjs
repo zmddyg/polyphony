@@ -1,17 +1,17 @@
-import { MODULE_MANIFESTS } from './core/activities.mjs';
 import { openSession } from './core/transport.mjs';
-import { lessons, getLesson } from './core/catalog.mjs';
+import { getLesson, WORKSPACE_LESSON_ID } from './core/catalog.mjs';
 import { exportScore, importScore } from './core/score-package.mjs';
 import { icon, esc, viewStyles } from './ui.mjs';
 
 const app = document.querySelector('#app');
 const overlays = document.querySelector('#overlays');
 const liveMessage = document.querySelector('#toast');
-const titles = {materials:'课件活化',desk:'智慧讲台',workshop:'独立互动设计',lab:'交互模组库',replay:'学情复盘',system:'Harness 架构与接口协议',student:'学生端',stage:'投影大屏',remote:'手机遥控'};
-const teacherViews = ['materials','desk','workshop','lab','replay','system'];
-const query = new URL(location.href).searchParams;
-let view = Object.hasOwn(titles,query.get('view')) ? query.get('view') : (query.has('room')?'desk':'materials');
-let labTab = query.get('tab') || null;
+const titles = {materials:'备课',desk:'课堂',workshop:'独立互动',replay:'课后复盘',student:'学生端',stage:'投影',remote:'手机遥控'};
+const teacherViews = ['materials','desk','workshop','replay'];
+let demonstration = null;
+let view = 'materials';
+let labTab = null;
+
 let session, unsubscribe, offStatus, cleanup, toastTimer, restoreFocus;
 let pendingPage, lectureKeyboard, qrScript;
 let generation = 0;
@@ -43,8 +43,9 @@ function localize(error) {
   return detail;
 }
 
+const recentKey = () => demonstration ? 'polyphony.demo.recent.v1' : 'polyphony.recent.v1';
 function recentRooms() {
-  const rooms = readStorage('polyphony.recent.v1', []);
+  const rooms = readStorage(recentKey(), []);
   return Array.isArray(rooms) ? rooms.filter(room => room?.code && room.title) : [];
 }
 function remember() {
@@ -52,9 +53,9 @@ function remember() {
   const {code,lesson,phase,demo} = session.state;
   const entry = {code,title:session.state.lecture?.title||lesson.title,phase,demo,mode:session.mode,at:Date.now()};
   const records = recentRooms();
-  if (records[0]?.code === code && records[0].phase === phase && records[0].title === lesson.title &&
+  if (records[0]?.code === code && records[0].phase === phase && records[0].title === entry.title &&
       records[0].mode === entry.mode && records[0].demo === demo) return;
-  writeStorage('polyphony.recent.v1',[entry,...records.filter(item => item.code !== code)].slice(0,16));
+  writeStorage(recentKey(),[entry,...records.filter(item => item.code !== code)].slice(0,16));
 }
 
 function setAddress(v, code, replace = false, tab = null) {
@@ -280,92 +281,43 @@ async function remotePair() {
   }
 }
 
-const phaseText = {collect:'收集中',reveal:'结果已公布',branch:'分支讨论',closed:'已结课'};
 function roomChooser() {
   const current = session;
-  const local = current.mode === 'local';
-  const records = recentRooms().slice(0,5);
-  const list = records.map(item => {
-    const open = item.code === current.code;
-    const kind = item.demo ? '模拟班级演示' : item.mode === 'local' ? '单机离线预演' : item.mode === 'server' ? '现场课堂' : '';
-    return `<button type="button" class="recent-room" data-restore="${esc(item.code)}"${open ? ' aria-current="true"' : ''}>
-      <span><b>${esc(item.title)}</b><small>${esc([item.code, kind, phaseText[item.phase]].filter(Boolean).join(' · '))}</small></span>
-      ${open ? '<em>当前课堂</em>' : icon('chevron-right',17)}</button>`;
-  }).join('');
-  const options = lessons.map(lesson => `<option value="${esc(lesson.id)}"${lesson.id === current.state.lessonId ? ' selected' : ''}>${esc(lesson.title)}</option>`).join('');
-  const dialog = modal('课堂管理', `
-    <section class="dialog-section" aria-labelledby="new-room-heading">
-      <h3 id="new-room-heading">新建课堂</h3>
-      <form data-create-room>
-        <label class="field-caption" for="new-lesson">选择课堂主题</label>
-        <select id="new-lesson" class="field-select" name="lesson">${options}</select>
-        <fieldset class="room-modes"><legend class="field-caption">课堂模式</legend><div>
-          <label><input type="radio" name="mode" value="empty" checked><strong>${local ? '单机离线预演' : '现场课堂'}</strong>
-            <small>${local ? '在同一浏览器用空白课堂演练' : '只统计学生的现场提交'}</small></label>
-          <label><input type="radio" name="mode" value="demo"><strong>模拟班级演示</strong><small>自带已标记的模拟作答</small></label>
-        </div></fieldset>
-        ${current.passphraseRequired ? `<label class="field-caption" for="new-room-passphrase">教师口令</label><input class="field-select" id="new-room-passphrase" name="passphrase" type="password" autocomplete="current-password" ${teacherPassphrase ? 'placeholder="留空沿用本次会话口令"' : 'required'}>` : ''}
-        <button type="submit" data-create class="action-primary dialog-full">${icon('plus',17)}创建课堂</button>
-      </form>
-      <p class="dialog-feedback" data-room-feedback role="status"></p>
-    </section>
-    <section class="dialog-section" aria-labelledby="switch-room-heading">
-      <h3 id="switch-room-heading">切换课堂</h3>
-      <form data-switch-room><label for="switch-code" class="visually-hidden">要打开的六位课堂码</label><div class="input-line">
-        <input id="switch-code" name="room" maxlength="6" minlength="6" pattern="[0-9A-Za-z]{6}" placeholder="输入六位课堂码"
-          autocomplete="off" autocapitalize="characters" spellcheck="false" required>
-        <button type="submit" class="plain-button">打开课堂</button></div></form>
-      <p class="dialog-feedback" data-room-feedback role="status"></p>
-      ${list ? '<p class="field-caption" id="recent-rooms-heading">最近打开</p><div class="recent-rooms" aria-labelledby="recent-rooms-heading">' + list + '</div>' : ''}
-    </section>`);
-  const controls = [...dialog.querySelectorAll('input, select, button')];
-  const feedback = [...dialog.querySelectorAll('[data-room-feedback]')];
-  const busy = pending => {
-    dialog.setAttribute('aria-busy', String(pending));
-    for (const control of controls) control.disabled = pending;
-  };
-  async function changeRoom(action, message, trigger) {
+  const records = recentRooms();
+  const list = records.map(room => `<button type="button" class="recent-room" data-restore="${esc(room.code)}">
+    <span><b>${esc(room.title)}</b><small>${esc(room.code)}${room.demo ? ' · 演示' : ''}</small></span>${icon('chevron-right',16)}
+  </button>`).join('');
+  const dialog = modal('课堂记录', `
+    <div class="recent-rooms">${list}</div>
+    <details class="prep-options"><summary>按课堂码打开</summary>
+      <form data-open-room><label class="field-caption" for="switch-code">课堂码</label><div class="input-line">
+        <input id="switch-code" name="room" maxlength="6" minlength="6" pattern="[0-9A-Za-z]{6}" autocomplete="off" required>
+        <button type="submit" class="plain-button">打开</button></div></form>
+    </details>
+    <p class="dialog-feedback" data-room-feedback role="status"></p>`);
+  const feedback = dialog.querySelector('[data-room-feedback]');
+  async function open(code, target) {
     if (dialog.getAttribute('aria-busy') === 'true') return;
-    const status = trigger?.closest('section')?.querySelector('[data-room-feedback]') ?? feedback[0];
-    for (const item of feedback) item.textContent = '';
-    busy(true);
-    status.dataset.kind = 'pending';
-    status.textContent = '正在连接课堂…';
+    dialog.setAttribute('aria-busy','true');
+    feedback.textContent = '正在打开课堂…';
     try {
-      const next = await action();
-      if (session !== current || !dialog.isConnected) { next.close(); return; }
-      activate(next, 'desk');
+      const next = code === current.code ? current : await openSession({ role:'teacher', room:code });
+      if (session !== current || !dialog.isConnected) { if (next !== current) next.close(); return; }
+      const ended = next.state.lecture ? next.state.lecture.mode === 'ended' : next.state.phase === 'closed';
+      activate(next, ended ? 'replay' : 'desk');
       focusSurface();
-      toast(message);
     } catch (error) {
       if (!dialog.isConnected) return;
-      busy(false);
-      status.dataset.kind = 'error';
-      status.textContent = localize(error);
-      trigger?.focus();
+      feedback.textContent = localize(error);
+      dialog.removeAttribute('aria-busy');
+      target?.focus();
     }
   }
-  function switchTo(code, trigger) {
-    if (code === current.code) { closeModal(); return; }
-    changeRoom(() => openSession({role:'teacher',room:code}), '已切换课堂', trigger);
-  }
-  dialog.querySelector('[data-create-room]').onsubmit = event => {
+  dialog.querySelectorAll('[data-restore]').forEach(button => button.onclick = () => open(button.dataset.restore,button));
+  dialog.querySelector('[data-open-room]').onsubmit = event => {
     event.preventDefault();
-    const options = new FormData(event.currentTarget);
-    const trigger = event.submitter ?? event.currentTarget.querySelector('[type="submit"]');
-    const passphrase = options.get('passphrase') || teacherPassphrase;
-    changeRoom(async () => {
-      const next = await current.newRoom({lessonId:options.get('lesson'),demo:options.get('mode') === 'demo',passphrase});
-      teacherPassphrase = passphrase;
-      return next;
-    }, '新课堂已开启', trigger);
+    open(event.currentTarget.elements.room.value.trim().toUpperCase(),event.submitter);
   };
-  dialog.querySelector('[data-switch-room]').onsubmit = event => {
-    event.preventDefault();
-    const code = event.currentTarget.elements.room.value.trim().toUpperCase();
-    switchTo(code, event.submitter ?? event.currentTarget.querySelector('[type="submit"]'));
-  };
-  for (const button of dialog.querySelectorAll('[data-restore]')) button.onclick = () => switchTo(button.dataset.restore, button);
 }
 
 function navLink(name, glyph) {
@@ -373,28 +325,15 @@ function navLink(name, glyph) {
   return '<a class="shell-nav-link" data-nav="'+name+'" href="?view='+name+'&amp;room='+esc(session.code)+'"'+current+'>'+icon(glyph,19)+'<span>'+titles[name]+'</span></a>';
 }
 
-function surfaceLink(name, glyph) {
-  return '<a class="shell-surface-link" href="'+esc(localSurfaceUrl(name))+'" target="_blank" rel="noopener" title="'+titles[name]+'（新窗口）" aria-label="'+titles[name]+'（新窗口）">'+icon(glyph,18)+'<span>'+titles[name]+'</span></a>';
-}
-
 function paintShellStatus() {
   const status = app.querySelector('[data-shell-status]');
   if (!status) return;
-  const connected = session.connected !== false;
   const local = session.mode === 'local';
-  const label = local ? '离线零网模式' : connected ? '实时课堂服务' : '正在连接课堂';
+  const connected = session.connected !== false;
+  const label = local ? '本机课堂' : connected ? '已连接' : '正在连接课堂…';
   const mode = status.querySelector('[data-mode]');
   if (mode.textContent !== label) mode.textContent = label;
   status.dataset.connection = local ? 'local' : connected ? 'online' : 'pending';
-  const lesson = app.querySelector('[data-shell-lesson]');
-  const title = classroomStarted ? (session.state.lecture?.title || session.state.lesson.title)
-    : view === 'materials' ? '导入课件，开始活化' : '尚未开启课堂';
-  const caption = app.querySelector('[data-shell-context]');
-  if (caption) caption.textContent = classroomStarted ? '当前课堂' : '教学工作区已就绪';
-  if (lesson.textContent !== title) {
-    lesson.textContent = title;
-    lesson.title = title;
-  }
 }
 
 function paintShell() {
@@ -406,22 +345,33 @@ function paintShell() {
     app.innerHTML = view === 'remote' ? '<main id="surface" class="remote-surface" tabindex="-1"></main>' : '<main id="surface"></main>';
     return;
   }
-  const roomCode = esc(session.code);
-  app.innerHTML = '<div class="workspace shell-workspace"><a class="shell-skip" href="#surface">跳到页面内容</a><aside id="rail" class="shell-rail" aria-label="教师导航">'+
-    '<div class="shell-brand-row"><a class="shell-brand" href="?view=materials&amp;room='+roomCode+'" data-nav="materials" aria-label="共演智课 · 课件活化">'+brand+'</a>'+
-    '<button type="button" class="shell-drawer-close" data-rail-close aria-label="收起导航">'+icon('close',20)+'</button></div>'+
-    '<nav class="shell-nav" aria-label="教师工作区"><div class="shell-nav-group"><p class="shell-nav-heading">教学工作区</p>'+
-    navLink('materials','book')+navLink('desk','desk')+navLink('lab','lab')+navLink('replay','replay')+'</div></nav>'+
-    '<div class="shell-rail-footer"><div class="shell-secondary-nav">'+navLink('system','network')+'</div><div class="shell-room-context"><span class="shell-room-context-icon">'+icon('book',17)+'</span><div><span data-shell-context>当前课堂</span><strong data-shell-lesson></strong></div></div>'+
-    '<div class="shell-connection" data-shell-status role="status"><i aria-hidden="true"></i><span data-mode></span></div></div></aside>'+
-    '<button type="button" class="shell-scrim" data-rail-close tabindex="-1" aria-label="收起导航"></button><div class="shell-main">'+
-    '<header class="shell-header"><div class="shell-header-inner"><div class="shell-header-left">'+
-    '<button type="button" class="shell-drawer-open" data-rail-open aria-label="展开导航" aria-controls="rail" aria-expanded="false">'+icon('menu',21)+'</button>'+
-    '<span class="shell-crumb">教师工作区</span><span class="shell-crumb">'+icon('chevron-right',13)+'</span>'+(view === 'workshop' ? '<a class="shell-crumb shell-parent" href="?view=materials" data-nav="materials">课件活化</a><span class="shell-crumb">'+icon('chevron-right',13)+'</span>' : '')+'<strong class="shell-current">'+titles[view]+'</strong></div>'+
-    '<div class="shell-header-actions"><button class="v3-api-button" data-api-hub aria-haspopup="dialog">🔌 模型 API 接入网关 <small data-api-badge></small></button>'+(view === 'desk' ? '' : surfaceLink('stage','monitor')+surfaceLink('student','smartphone'))+
-    (view === 'desk' && session.mode === 'server' ? '<button type="button" class="shell-surface-link" data-remote-pair aria-haspopup="dialog">'+icon('smartphone',18)+'手机遥控</button>' : '')+
-    '<button type="button" class="shell-room-button" data-rooms aria-haspopup="dialog" aria-label="课堂管理，切换或创建课堂，当前课堂码 '+roomCode+'"><span>课堂码</span><b>'+roomCode+'</b>'+icon('chevron-down',13)+'</button></div></div></header>'+
-    '<main id="surface" class="content shell-content" tabindex="-1"></main></div></div>';
+
+  app.innerHTML = `<div class="workspace shell-workspace"><a class="shell-skip" href="#surface">跳到页面内容</a>
+    <aside id="rail" class="shell-rail" aria-label="教师导航">
+      <div class="shell-brand-row"><a class="shell-brand" href="?view=materials&amp;room=${esc(session.code)}" data-nav="materials" aria-label="共演智课 · 备课">${brand}</a>
+        <button type="button" class="shell-drawer-close" data-rail-close aria-label="收起导航">${icon('close',20)}</button></div>
+      <nav class="shell-nav" aria-label="教师工作区"><div class="shell-nav-group">
+        ${demonstration ? navLink('demo','play') + navLink('lab','lab') : ''}
+        ${navLink('materials','book')}
+        ${classroomStarted && view !== 'replay' ? navLink('desk','desk') : ''}
+        ${view === 'replay' ? navLink('replay','replay') : ''}
+      </div></nav>
+      ${classroomStarted ? '<div class="shell-rail-footer"><div class="shell-connection" data-shell-status role="status"><i aria-hidden="true"></i><span data-mode></span></div></div>' : ''}
+    </aside>
+    <button type="button" class="shell-scrim" data-rail-close tabindex="-1" aria-label="收起导航"></button>
+    <div class="shell-main"><header class="shell-header"><div class="shell-header-inner">
+      <div class="shell-header-left">
+        <button type="button" class="shell-drawer-open" data-rail-open aria-label="展开导航" aria-controls="rail" aria-expanded="false">${icon('menu',21)}</button>
+        <strong class="shell-current">${titles[view]}</strong>
+      </div>
+      <div class="shell-header-actions">
+        ${recentRooms().length ? '<button type="button" class="shell-room-button" data-rooms aria-haspopup="dialog">课堂记录</button>' : ''}
+        ${view === 'desk' && classroomStarted && !session.state.lecture && session.mode === 'server'
+          ? '<button type="button" class="shell-room-button" data-remote-pair aria-haspopup="dialog">手机遥控</button>' : ''}
+        <button type="button" class="shell-room-button" data-api-hub aria-haspopup="dialog">设置</button>
+      </div>
+    </div></header><main id="surface" class="content shell-content" tabindex="-1"></main></div></div>`;
+
   for (const link of app.querySelectorAll('[data-nav]')) link.onclick = event => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
@@ -429,10 +379,9 @@ function paintShell() {
   };
   app.querySelector('[data-rail-open]').onclick = () => setRail(true);
   for (const button of app.querySelectorAll('[data-rail-close]')) button.onclick = () => setRail(false);
-  app.querySelector('[data-rooms]').onclick = roomChooser;
-  app.querySelector('[data-api-hub]').onclick = modelApiDialog;
+  app.querySelector('[data-rooms]')?.addEventListener('click', roomChooser);
+  app.querySelector('[data-api-hub]').onclick = () => modelApiDialog(() => { if (view === 'materials') paintPage(); });
   app.querySelector('[data-remote-pair]')?.addEventListener('click', remotePair);
-  paintProviderBadge();
   paintShellStatus();
   setRail(false, false);
 }
@@ -481,7 +430,7 @@ async function startLesson(lesson) {
   let next;
   publishingLesson = true;
   try {
-    next = await withTeacherPassphrase(passphrase => active.newRoom({lessonId:built?.id || 'mzi',demo:false,passphrase}));
+    next = await withTeacherPassphrase(passphrase => active.newRoom({lessonId:built?.id || WORKSPACE_LESSON_ID,demo:false,passphrase}));
     if (!canonical) await next.command('loadLesson',{lesson:prepared});
     if (session !== active) throw new Error('当前课堂已切换，请重新发布互动配置。');
     activate(next,'desk');
@@ -517,6 +466,8 @@ async function startLecture(lecture, { experiment = false } = {}) {
 function context() {
   const active=session, snapshot=active.state;
   return {state:snapshot,mode:active.mode,connected:active.connected,remote:view==='remote',participantId:active.participantId,tab:labTab,esc,icon,toast,go,invite,open:openSurface,url:v=>active.url(v),
+    demonstration: Boolean(demonstration), configureModel: modelApiDialog,
+    remotePair: active.mode === 'server' && view === 'desk' ? remotePair : null,
     askPeer:snapshot.lecture ? ()=>active.askPeer(snapshot.lecture.index,snapshot.lecture.turn) : null,
     startLecture,startLesson,getState:()=>active.state,getRoomState:()=>active.state,getFrame:index=>active.getFrame(index),
     get providerSummary(){return active.providerSummary;},runHarness:(material,options)=>active.runHarness(material,options),authorDeck:(spec,options)=>active.authorDeck(spec,options),
@@ -533,14 +484,11 @@ function context() {
       return result;}};
 }
 
-function paintProviderBadge() {
+
+
+function modelApiDialog(onUpdate) {
   const summary=session.providerSummary??{};
-  const badge=app.querySelector('[data-api-badge]');
-  if(badge) { badge.textContent=summary.configured?'已连接 · '+summary.model:'未配密钥 · 离线编排就绪'; badge.dataset.connected=String(!!summary.configured); }
-}
-function modelApiDialog() {
-  const summary=session.providerSummary??{};
-  const dialog=modal('模型 API Hub',`<p class="dialog-intro">OpenAI 兼容 Chat Completions 协议，可连接 DeepSeek、Qwen、Gemini 或校园网关。</p><form class="v3-provider-form"><label>预设端点<select name="preset"><option value="custom">自定义 / 校园网关</option><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="qwen">Qwen</option><option value="gemini">Gemini（兼容协议）</option></select></label><label>Base URL<input type="url" name="baseUrl" required placeholder="https://gateway.example.edu/v1" autocomplete="off"></label><label>Model<input name="model" required value="${esc(summary.model??'')}" placeholder="模型名称" autocomplete="off"></label><label>API Key<input type="password" name="key" required autocomplete="new-password" placeholder="输入密钥（不回显已保存密钥）"></label><label>输出模式<select name="outputMode"><option value="json_object">JSON Object（通用兼容）</option><option value="json_schema">JSON Schema（严格结构）</option><option value="text">Text JSON（兼容网关）</option></select></label><p class="v3-secret-note">${session.mode==='local'?'仅保存在当前浏览器标签页会话内存，关闭即销毁，绝不写入导出课件':'仅保存在本机服务运行内存，停止服务即销毁，绝不写入课堂存档或导出课件'}。</p><div class="v3-dialog-actions"><button class="v3-subtle" type="button" data-provider-clear>清除配置</button><button class="v3-subtle" type="button" data-provider-test>测试连接</button><button class="v3-primary" type="submit">保存至当前会话</button></div><p role="status" data-provider-feedback></p></form>`);
+  const dialog=modal('模型设置',`<p class="dialog-intro">OpenAI 兼容 Chat Completions 协议，可连接 DeepSeek、Qwen、Gemini 或校园网关。</p><form class="v3-provider-form"><label>预设端点<select name="preset"><option value="custom">自定义 / 校园网关</option><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="qwen">Qwen</option><option value="gemini">Gemini（兼容协议）</option></select></label><label>Base URL<input type="url" name="baseUrl" required placeholder="https://gateway.example.edu/v1" autocomplete="off"></label><label>Model<input name="model" required value="${esc(summary.model??'')}" placeholder="模型名称" autocomplete="off"></label><label>API Key<input type="password" name="key" required autocomplete="new-password" placeholder="输入密钥（不回显已保存密钥）"></label><label>输出模式<select name="outputMode"><option value="json_object">JSON Object（通用兼容）</option><option value="json_schema">JSON Schema（严格结构）</option><option value="text">Text JSON（兼容网关）</option></select></label><p class="v3-secret-note">${session.mode==='local'?'仅保存在当前浏览器标签页会话内存，关闭即销毁，绝不写入导出课件':'仅保存在本机服务运行内存，停止服务即销毁，绝不写入课堂存档或导出课件'}。</p><div class="v3-dialog-actions"><button class="v3-subtle" type="button" data-provider-clear>清除配置</button><button class="v3-subtle" type="button" data-provider-test>测试连接</button><button class="v3-primary" type="submit">保存至当前会话</button></div><p role="status" data-provider-feedback></p></form>`);
   const form=dialog.querySelector('form'),feedback=form.querySelector('[data-provider-feedback]');
   const presets={openai:['https://api.openai.com/v1','gpt-4.1-mini'],deepseek:['https://api.deepseek.com','deepseek-chat'],qwen:['https://dashscope.aliyuncs.com/compatible-mode/v1','qwen-plus'],gemini:['https://generativelanguage.googleapis.com/v1beta/openai','gemini-2.5-flash']};
   form.elements.preset.onchange=()=>{const p=presets[form.elements.preset.value];if(p){form.elements.baseUrl.value=p[0];form.elements.model.value=p[1];}};
@@ -550,7 +498,7 @@ function modelApiDialog() {
     if(test)Object.assign(input,{test:true,testOnly:true});
     for(const b of form.querySelectorAll('button'))b.disabled=true;
     feedback.textContent=test?'正在测试连接（最多 5 秒）…':'正在保存当前会话…';
-    try { await session.configureProvider(input); feedback.textContent=clear?'配置已清除。':test?'连接测试通过。':'已保存；密钥不会写入课件。';paintProviderBadge(); }
+    try { await session.configureProvider(input); feedback.textContent=clear?'配置已清除。':test?'连接测试通过。':'已保存；密钥不会写入课件。';if (!test) onUpdate?.(); }
     catch(error){feedback.textContent=localize(error);}
     finally{for(const b of form.querySelectorAll('button'))b.disabled=false;}
   };
@@ -558,18 +506,11 @@ function modelApiDialog() {
   form.querySelector('[data-provider-test]').onclick=()=>perform(true);
   form.querySelector('[data-provider-clear]').onclick=()=>perform(false,true);
 }
-function systemView(root) {
-  const embedded = document.getElementById('polyphony-architecture')?.textContent.trim();
-  const architecture = embedded ? 'data:image/svg+xml;base64,'+embedded : './assets/architecture.svg';
-  root.innerHTML=`<section class="v3-system"><header class="v3-page-heading"><div><h1>Harness 架构与接口协议</h1><p>共演智课 · Polyphony V4.0 — 面向全学科旧课件活化的智能编排 Harness 与模块化互动教学平台</p></div></header><div class="v3-architecture-layout"><section class="v3-architecture-diagram"><img src="${architecture}" alt="共演智课 V4 双源备课与原生流式播放器架构"></section><aside class="v3-system-gateway"><h2>模型 API 接入网关</h2><p>OpenAI 兼容 Chat Completions</p><div class="v3-endpoint-list">OpenAI<br>DeepSeek<br>Qwen<br>Gemini（兼容端点）<br>校内网关 / 自定义</div><p>JSON Schema / JSON Object / Text JSON</p><p class="v3-secret-note">密钥仅存在当前运行会话内存。停止服务或关闭离线标签页即销毁，不写入课件、课堂存档与导出文件。</p><button class="v3-primary" data-system-api>配置模型 API</button><p>未配密钥时，可运行本地离线编排与已标记的修复回放。</p></aside></div><details class="v3-system-card"><summary>阶段契约与部署边界</summary><p>原页 M 编号逐字溯源；safe-expr 白名单 AST；失败精确反馈后仅修复一次；双轮状态机试跑后由教师发布。编号验证不代替语义与量纲核查。</p><p>单文件 HTML 无需联网；同屏多设备授课使用 Node.js 22+ 本机局域网服务。PDF / PPT 原页转换取决于本机可用转换器。</p></details></section>`;
-  root.querySelector('[data-system-api]').onclick=modelApiDialog;
-  return;
 
-}
 
 const pages = {
   materials: {
-    styles: ['workshop', 'material-workspace', 'material-notes', 'material-science'],
+    styles: ['lecture-stage', 'material-science'],
     load: () => import('./views/material-workspace.mjs').then(module => module.renderMaterialWorkspace),
   },
   desk: { styles: ['desk'], load: () => import('./views/desk.mjs').then(module => module.renderDesk) },
@@ -577,8 +518,6 @@ const pages = {
   stage: { styles: ['cognition','surfaces'], load: () => import('./views/surfaces.mjs').then(module => module.renderStage) },
   workshop: { styles: ['workshop'], load: () => import('./views/workshop.mjs').then(module => module.renderWorkshop) },
   replay: { styles: ['cognition','replay'], load: () => import('./views/replay.mjs').then(module => module.renderReplay) },
-  lab: { styles: ['lab', 'challenge-lab','cognition'], load: () => import('./views/lab.mjs').then(module => module.renderLab) },
-  system: { render: systemView },
 };
 pages.remote = pages.desk;
 
@@ -729,7 +668,7 @@ function errorPage(message, code) {
     event.preventDefault();
     submitEntry(view, input.value.trim().toUpperCase(), submit, '正在连接…');
   };
-  if (reset) reset.onclick = () => submitEntry('desk', null, reset, '正在创建…');
+  if (reset) reset.onclick = () => submitEntry('materials', null, reset, '正在打开…');
   if (resume) resume.onclick = () => submitEntry('desk', recent.code, resume, '正在返回…');
   if (message) input.focus({ preventScroll:true });
 }
@@ -761,7 +700,7 @@ async function connect(v,code,claim = takeRemoteClaim(v)) {
   if(role!=='teacher' && !code) {view=v;errorPage('',null);return;}
   if (!Object.hasOwn(lecturePages, v)) void preparePage(pages[v]).catch(() => {});
   try {
-    const request = passphrase => openSession({role,room:code,demo:true,lessonId:'mzi',remote:v==='remote',claim,passphrase});
+    const request = passphrase => openSession({role,room:code,demo:false,lessonId:WORKSPACE_LESSON_ID,remote:v==='remote',claim,passphrase});
     const next = role === 'teacher' && !code && v !== 'remote' ? await withTeacherPassphrase(request) : await request(teacherPassphrase);
     if(token!==generation) {next.close();return;}
     activate(next,v,true,!!code && !readStorage('polyphony.workspace.pending.v1', []).includes(next.code));
@@ -770,7 +709,7 @@ async function connect(v,code,claim = takeRemoteClaim(v)) {
 
 window.addEventListener('popstate',()=>{
   const params=new URL(location.href).searchParams;
-  const v=Object.hasOwn(titles,params.get('view'))?params.get('view'):(params.has('room')?'desk':'materials');
+  const v = requestedView(params);
   const code=params.get('room');
   const claim=takeRemoteClaim(v);
   labTab=params.get('tab');
@@ -798,5 +737,24 @@ window.addEventListener('keydown', event => {
   }
 });
 window.addEventListener('pagehide',e=>{if(!e.persisted)session?.close();});
-const requestedRoom=query.get('room') || (roleFor(view)==='teacher' && view!=='remote' ? recentRooms()[0]?.code : null);
-connect(view,requestedRoom);
+function requestedView(params) {
+  const requested = params.get('view');
+  if ((requested === 'desk' || requested === 'replay') && !params.has('room')) return 'materials';
+  if (Object.hasOwn(titles, requested)) return requested;
+  if (demonstration && requested === 'system') return 'lab';
+  return demonstration ? 'demo' : params.has('room') && !requested ? 'desk' : 'materials';
+}
+
+export function startApplication(extras = null) {
+  demonstration = extras;
+  if (extras) {
+    Object.assign(titles, { demo:'比赛演示', lab:'交互模组' });
+    teacherViews.push('demo','lab');
+    pages.demo = { render:extras.renderMenu };
+    pages.lab = { styles:['lab','challenge-lab','cognition'], load:extras.loadGallery };
+  }
+  const query = new URL(location.href).searchParams;
+  view = requestedView(query);
+  labTab = query.get('tab');
+  void connect(view, query.get('room'));
+}

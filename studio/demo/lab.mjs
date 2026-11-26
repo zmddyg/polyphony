@@ -1,8 +1,8 @@
-import { MODULE_MANIFESTS } from '../core/activities.mjs';
-import { spaceLesson,pointerLesson,gaussianLesson,diffractionLesson,mzmLesson,ethicsLesson } from '../core/universal-lessons.mjs';
-import { createRoom,reduceRoom } from '../core/engine.mjs';
-import { moduleHtml,bindModule } from './module-renderer.mjs';
-import { renderContrastWall,renderCognitionReport } from './cognition.mjs';
+import { MODULE_MANIFESTS } from '../dist/core/activities.mjs';
+import { spaceLesson,pointerLesson,gaussianLesson,diffractionLesson,mzmLesson,ethicsLesson } from '../dist/core/universal-lessons.mjs';
+import { createRoom,reduceRoom } from '../dist/core/engine.mjs';
+import { moduleHtml,bindModule } from '../dist/views/module-renderer.mjs';
+import { renderContrastWall,renderCognitionReport } from '../dist/views/cognition.mjs';
 const names=['01 双轮概念对撞','02 推导/代码找茬','03 声明式公式沙盒','04 方案权衡与AI质询'];
 const examples=[spaceLesson,pointerLesson,gaussianLesson,ethicsLesson];
 export function renderLab(root,ctx) {

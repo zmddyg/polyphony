@@ -200,4 +200,11 @@ export const lessons = [...universalLessons,
   }
 ];
 
-export function getLesson(id) { return lessons.find(lesson => lesson.id === id); }
+export const WORKSPACE_LESSON_ID = 'workspace';
+const workspaceLesson = {
+  id: WORKSPACE_LESSON_ID, title: '备课', subject: '', description: '', prompt: '',
+  options: [], branches: [], skills: [], steps: [],
+};
+export function getLesson(id) {
+  return id === WORKSPACE_LESSON_ID ? workspaceLesson : lessons.find(lesson => lesson.id === id);
+}

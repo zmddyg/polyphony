@@ -7,7 +7,7 @@ ROOT=SOURCE.parent.parent;M=ROOT/'.polyphony-work/github-publish-20261124/polyph
 assert M.resolve().is_relative_to(ROOT.resolve()) and M.name=='polyphony'
 OLD=['01-C语言指针与线性代数空间精讲.pptx','02-光电调制与探测链路精选.pptx','03-人工智能与工程伦理导论研讨.pptx']
 screens=sorted(ROOT.glob('0[1-7]-*.png'));assert len(screens)==7
-root_files=[ROOT/n for n in ['README.md','启动V4共演.cmd','共演智课-单文件离线演示版.html','共演智课-交互模组库独立版.html','共演智课-系统架构与Harness协议.pdf']]+screens
+root_files=[ROOT/n for n in ['README.md','启动V4共演.cmd','共演智课-离线平台.html','共演智课-单文件离线演示版.html','共演智课-系统架构与Harness协议.pdf']]+screens
 for path in root_files:assert path.exists();shutil.copy2(path,SOURCE/path.name)
 native=SOURCE/'示例课件/V4原生实战课件'
 if native.is_file():
@@ -32,6 +32,7 @@ runtime_suffixes=(
 )
 def excluded(name):
  name=name.lower()
+ if name == '.env.example':return False
  return name in exclude or name.startswith(('.env','.polyphony-rooms')) or name.endswith(runtime_suffixes)
 
 manifest={}

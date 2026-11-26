@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { lecturePlanKinds, localLecturePlan, validatePlanSuggestions, challengeForFrame } from '../dist/core/lecture-planner.mjs';
-import { createDemoMaterial, isDemoDiagram } from '../dist/core/demo-lesson.mjs';
+import { createDemoMaterial, isDemoDiagram } from '../demo/demo-lesson.mjs';
 import { buildLectureScore, isEmbeddedLectureImage } from '../dist/core/lecture-score.mjs';
 import { formulaHtml } from '../dist/core/formula-text.mjs';
 import { createHash } from 'node:crypto';
 import { planLecture } from '../lesson-provider.mjs';
 test('three multi-disciplinary decks preserve original pages and select universal interactions', async () => {
-  const {SHOWCASE_DECKS}=await import('../dist/core/demo-lesson.mjs');
+  const {SHOWCASE_DECKS}=await import('../demo/demo-lesson.mjs');
   const {rehearseDeckHarness}=await import('../dist/core/deck-harness.mjs');
   assert.deepEqual(SHOWCASE_DECKS.filter(d=>!d.native).map(d=>d.id),['deck-foundation','deck-photonics','deck-seminar']);
   for(const deck of SHOWCASE_DECKS.filter(d=>!d.native)){

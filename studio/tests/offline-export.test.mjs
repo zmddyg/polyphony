@@ -21,13 +21,13 @@ function embeddedModules(html) {
   }));
 }
 
-test('standalone exports include lazy dependencies and route styles', async () => {
+test('the offline platform omits the competition decks and the demo exports them with shared runtime', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'polyphony-offline-'));
   const studio = join(dir, 'studio.html');
   const playlab = join(dir, 'playlab.html');
   try {
     await run(process.execPath, [exporter, studio]);
-    await run(process.execPath, [exporter, '--challenges', playlab]);
+    await run(process.execPath, [exporter, '--demo', playlab]);
     const [studioHtml, playlabHtml] = await Promise.all([
       readFile(studio, 'utf8'), readFile(playlab, 'utf8'),
     ]);
@@ -38,20 +38,26 @@ test('standalone exports include lazy dependencies and route styles', async () =
         assert.ok(Object.hasOwn(modules, name), `lazy dependency ${name} is embedded`);
       }
     }
-    assert.deepEqual([...studioHtml.matchAll(/<template data-view-style="([^"]+)"/g)].map(([, name]) => name), viewStyles);
+    assert.deepEqual([...studioHtml.matchAll(/<template data-view-style="([^"]+)"/g)].map(([, name]) => name),
+      viewStyles.filter(name => name !== 'lab'));
     assert.doesNotMatch(studioHtml, /<script[^>]+src=|<link[^>]+rel="stylesheet"/);
     assert.doesNotMatch(studioHtml, /QR Code Generator for JavaScript/);
 
-    const diagram = studioHtml.match(/id="polyphony-architecture"[^>]*>([^<]+)<\/script>/)?.[1];
+    assert.doesNotMatch(studioHtml, /id="polyphony-(?:architecture|demo-decks)"/);
+    assert.ok(!Object.keys(modules).some(name => name.startsWith('@polyphony/demo/')));
+    assert.ok(!modules['@polyphony/core/deck-harness.mjs'].includes('deck-c-pointers'));
+
+    const diagram = playlabHtml.match(/id="polyphony-architecture"[^>]*>([^<]+)<\/script>/)?.[1];
     assert.ok(diagram);
-    const svg = await readFile(new URL('../dist/assets/architecture.svg', import.meta.url), 'utf8');
+    const svg = await readFile(new URL('../demo/architecture.svg', import.meta.url), 'utf8');
     assert.equal(Buffer.from(diagram, 'base64').toString('utf8'), svg.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n'));
     assert.ok(!modules['@polyphony/app.mjs'].includes(diagram), 'the app does not contain another copy of the diagram');
 
-    assert.ok(embeddedModules(playlabHtml)['@polyphony/views/lab.mjs']);
-    assert.match(playlabHtml, /\?view=lab/);
-    assert.match(playlabHtml, /data-view-style/);
-    assert.match(playlabHtml, /polyphony-architecture/);
+    assert.ok(embeddedModules(playlabHtml)['@polyphony/demo/lab.mjs']);
+    const data = playlabHtml.match(/id="polyphony-demo-decks"[^>]*>([^<]+)<\/script>/)?.[1];
+    const decks = JSON.parse(data);
+    assert.deepEqual(decks.map(({ score }) => score.pages.length), [12, 10, 10]);
+    assert.deepEqual(decks.map(({ score }) => score.pages.filter(page => page.interaction).length), [3, 3, 3]);
   } finally {
     await Promise.all([rm(studio, {force:true}), rm(playlab, {force:true})]);
     await rmdir(dir);

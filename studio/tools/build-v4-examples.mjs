@@ -1,6 +1,6 @@
 import {mkdir,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
-import {COMBAT_DECKS,combatMaterial} from '../dist/core/combat-decks.mjs';
+import {COMBAT_DECKS,combatMaterial} from '../demo/combat-decks.mjs';
 import {runDeckHarness} from '../dist/core/deck-harness.mjs';
 const target=process.argv[2]??fileURLToPath(new URL('../artifacts/v4-decks/',import.meta.url));
 await mkdir(target,{recursive:true});

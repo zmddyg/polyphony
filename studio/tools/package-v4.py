@@ -14,17 +14,23 @@ SOURCE = STUDIO.parent
 DELIVERY = SOURCE.parents[1] if SOURCE.name == 'source' and SOURCE.parent.name == '.polyphony-work' else SOURCE
 ARCHIVE_NAME = '共演智课-AI教学大赛交付包.zip'
 STUDIO_PREFIX = 'polyphony-studio'
+DEMO_PREFIX = '比赛演示'
 MATERIALS = (
     'README.md',
     '启动V4共演.cmd',
+    '共演智课-离线平台.html',
+)
+DEMO_MATERIALS = (
     '共演智课-参赛作品介绍文档.pdf',
     '共演智课-决赛现场演示PPT.pptx',
     '共演智课-系统架构与Harness协议.pdf',
     '共演智课-单文件离线演示版.html',
-    '共演智课-交互模组库独立版.html',
 )
-STUDIO_FILES = {'.dockerignore', 'Dockerfile', 'package.json', 'README.md'}
-STUDIO_FOLDERS = ('dist', 'scripts', 'tests', 'tools')
+STUDIO_FILES = {'.dockerignore', 'Dockerfile', 'package.json', 'start.sh'}
+STUDIO_TOOLS = (
+    'material-import-libreoffice.py', 'material-import-pdf.py',
+    'material-import-powerpoint.ps1', 'export-offline.mjs',
+)
 EXCLUDED_NAMES = {'.cache', '.git', '.openai', '.pytest_cache', '__pycache__', 'artifacts', 'node_modules'}
 EXCLUDED_SUFFIXES = (
     '.db', '.db-journal', '.db-shm', '.db-wal', '.lectures', '.log', '.pyc', '.pyo',
@@ -54,11 +60,13 @@ def release_entries(delivery):
     entries = {}
     for name in MATERIALS:
         add_entry(entries, name, delivery / name, delivery)
+    for name in DEMO_MATERIALS:
+        add_entry(entries, f'{DEMO_PREFIX}/{name}', delivery / name, delivery)
     for number in range(1, 8):
         screenshots = sorted(delivery.glob(f'{number:02}-*.png'))
         if len(screenshots) != 1:
             raise ValueError(f'Expected one screenshot numbered {number:02} in {delivery}')
-        add_entry(entries, screenshots[0].name, screenshots[0], delivery)
+        add_entry(entries, f'{DEMO_PREFIX}/旧版截图/{screenshots[0].name}', screenshots[0], delivery)
 
     examples = delivery / '示例课件'
     for pattern, count in (('*-*.pptx', 3), ('*-*.pdf', 1), ('V4原生实战课件/deck-*.json', 6)):
@@ -66,21 +74,19 @@ def release_entries(delivery):
         if len(samples) != count:
             raise ValueError(f'Expected {count} sample files matching {pattern} in {examples}')
         for path in samples:
-            add_entry(entries, path.relative_to(delivery).as_posix(), path, delivery)
+            add_entry(entries, f'{DEMO_PREFIX}/{path.relative_to(delivery).as_posix()}', path, delivery)
 
     for path in STUDIO.iterdir():
         if not excluded(path.name) and (path.suffix in {'.cmd', '.mjs'} or path.name in STUDIO_FILES):
             add_entry(entries, f'{STUDIO_PREFIX}/{path.name}', path, STUDIO)
-    for folder in STUDIO_FOLDERS:
-        source_dir = STUDIO / folder
-        if not source_dir.is_dir() or not source_dir.resolve().is_relative_to(STUDIO):
-            raise ValueError(f'Missing or external studio source directory: {source_dir}')
-        for directory, dirs, files in os.walk(source_dir):
-            dirs[:] = [name for name in dirs if not excluded(name)]
-            for name in files:
-                if not excluded(name):
-                    path = Path(directory) / name
-                    add_entry(entries, f'{STUDIO_PREFIX}/{path.relative_to(STUDIO).as_posix()}', path, STUDIO)
+    for directory, dirs, files in os.walk(STUDIO / 'dist'):
+        dirs[:] = [name for name in dirs if not excluded(name)]
+        for name in files:
+            if not excluded(name):
+                path = Path(directory) / name
+                add_entry(entries, f'{STUDIO_PREFIX}/{path.relative_to(STUDIO).as_posix()}', path, STUDIO)
+    for name in STUDIO_TOOLS:
+        add_entry(entries, f'{STUDIO_PREFIX}/tools/{name}', STUDIO / 'tools' / name, STUDIO)
 
     for name in ('server.mjs', '启动共演.cmd', 'dist/index.html', 'dist/app.mjs'):
         if f'{STUDIO_PREFIX}/{name}' not in entries:

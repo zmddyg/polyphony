@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runDeckHarness,rehearseDeckHarness,createPageModule,validateHarnessLesson,HARNESS_STAGES } from '../dist/core/deck-harness.mjs';
-import { SHOWCASE_DECKS,createDemoMaterial } from '../dist/core/demo-lesson.mjs';
+import { SHOWCASE_DECKS,createDemoMaterial } from '../demo/demo-lesson.mjs';
 import { MODULE_MANIFESTS,validateModulePayload,getActivity } from '../dist/core/activities.mjs';
 import { universalLessons,gaussianConfig } from '../dist/core/universal-lessons.mjs';
 import { importScore,exportScore } from '../dist/core/score-package.mjs';

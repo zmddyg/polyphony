@@ -1,5 +1,5 @@
 import { exportScore } from './score-package.mjs';
-import { isDemoDiagram } from './demo-lesson.mjs';
+import { sha256WithoutWebCrypto } from './material-notebook.mjs';
 
 const format = 'polyphony.lecture';
 const version = 1;
@@ -56,7 +56,36 @@ export function validateSlideBlocks(value) {
   });
 }
 
-export const isEmbeddedLectureImage = src => typeof src === 'string' && (imagePrefix.test(src) || isDemoDiagram(src));
+// Preserve previously published SVG previews by content, without loading their original courses.
+const legacyPreviewHashes = new Set([
+  '1469a1122bc4152eeef57560c397e71d9a56aae99c7675438a08e9fa06be8c41',
+  'db81632ca9f853a19f771b7f6f8ce6cd32f6bbfd5e74b45617fefcace384aa11',
+  '12e21c0779d0f97e9c5c3176dd852f3c2fd0e4827e3d7f8d7bf3b1f36e6fa170',
+  'aa672cc2f5f57df07d4a519d8f770ee1bbdcbf0aeefde60546d68151f1882244',
+  '972ad8feb2074eb5f51a5038582c19fe42e324c64003877f9457de167adc2379',
+  '89810546e82ed9c80c6cddc5f6a65f1a4a546725535913f71e320be035117147',
+  'ec8a991ba4b6188d93aa192a0e0d943b6af1b71ea6fa87be53aa37a2709f41ff',
+  '43b88e718e16709fc0d5f622caeae88a665976df10852fbd57606fdad772a44a',
+  '04739bedaec2fe923db054c500f417257196f5d3cbc030842ab94e70e4987c46',
+  'ef28913d49f291332ff729e419988838834e9342d7ea9e5f7315ff9a04e05f70',
+  'e310c2a2771953155a2835a542447c793f08a1f7602c87f2c639e1ea13088fa4',
+  '94c57528ea4774004c1e37361811e47d1811c2c81d126936482155ed59f6b273',
+  'eac1621d6d9b120e2241f0dd61bceda6463ab618514080091aa5d9cb4bd0823a',
+  '8975248d9d4bd4aadb1e82bb9d2c0cb3f332c937022e5587d3fd264a1e817996',
+]);
+export function isEmbeddedLectureImage(src) {
+  return typeof src === 'string' && (imagePrefix.test(src) ||
+    (src.length <= 1450 && src.startsWith('data:image/svg+xml;base64,') &&
+      legacyPreviewHashes.has(sha256WithoutWebCrypto(new TextEncoder().encode(src)))));
+}
+
+export function blockText(block) {
+  return [
+    block.title, block.text, block.code, ...(block.headers ?? []), ...(block.rows ?? []).flat(),
+    ...(block.items ?? []).map(item => typeof item === 'string' ? item : item.value + ' ' + item.label),
+    ...(block.left ? [blockText(block.left), blockText(block.right)] : []),
+  ].filter(Boolean).join('\n');
+}
 
 function image(src, field) {
   if (!isEmbeddedLectureImage(src)) throw new Error(`${field}须使用已嵌入的原稿图片。`);

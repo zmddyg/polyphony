@@ -1,5 +1,7 @@
 // Original teaching material, aligned to the requested HUST chapter outline.
 // The English datasets below are deliberately synthetic, not attributed research.
+import { blockText } from '../dist/core/lecture-score.mjs';
+export { blockText } from '../dist/core/lecture-score.mjs';
 const table=(title,headers,rows)=>({type:'table',title,headers,rows});
 const note=(title,text,tone='note')=>({type:'callout',title,text,tone});
 const code=(title,code)=>({type:'code',title,language:'c',code});
@@ -218,7 +220,6 @@ const englishPages=[
     note('Exit sentence','The evidence suggests ___; however, ___ remains uncertain. I would revise my position if ___.','success'),
   ]],
 ];
-export const blockText=b=>[b.title,b.text,b.code,...(b.headers??[]),...(b.rows??[]).flat(),...(b.items??[]).map(i=>typeof i==='string'?i:i.value+' '+i.label),...(b.left?[blockText(b.left),blockText(b.right)]:[])].filter(Boolean).join('\n');
 const make=(id,label,title,icon,raw)=>({id,label,title,icon,native:true,pages:raw.map(([title,blocks,showcaseLesson],i)=>({number:i+1,title,blocks,text:blocks.map(blockText).join('\n'),images:[],speakerNotes:'先讲解本页结构，再让学生独立判断。保留条件与适用范围；双轮改答后总结机制。',...(showcaseLesson&&{showcaseLesson})}))});
 export const COMBAT_DECKS=[
   make('deck-c-pointers','C语言 · 第6章指针实战','软件技术基础（C语言）：指针变量、自增优先级与函数传址实战','⌘',cPages),

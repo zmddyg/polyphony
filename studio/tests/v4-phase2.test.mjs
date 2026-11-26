@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {createRoom,reduceRoom} from '../dist/core/engine.mjs';
-import {combatMaterial} from '../dist/core/combat-decks.mjs';
+import {combatMaterial} from '../demo/combat-decks.mjs';
 import {createPageModule,runDeckHarness,detectPageActivity} from '../dist/core/deck-harness.mjs';
 import {validateLectureScore} from '../dist/core/lecture-score.mjs';
 import {importMaterialFile} from '../material-import.mjs';

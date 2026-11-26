@@ -1,6 +1,6 @@
 import {mkdir,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
-import {SHOWCASE_DECKS,createDemoMaterial} from '../dist/core/demo-lesson.mjs';
+import {SHOWCASE_DECKS,createDemoMaterial} from '../demo/demo-lesson.mjs';
 import {rehearseDeckHarness} from '../dist/core/deck-harness.mjs';
 const directory=new URL('../artifacts/v3-examples/',import.meta.url);
 await mkdir(directory,{recursive:true});
