@@ -1,50 +1,213 @@
-import { getActivity } from './activities.mjs';
+import { mzmTransfer } from './optics.mjs';
+import { getActivity, validateModulePayload } from './activities.mjs';
 import { getLesson } from './catalog.mjs';
 
 const demoAnswers = {
-  mzi: [
-    ['林同学', 'dark', '在 A 口两束光相消，所以光能应该就没有了，B 口也不会亮。'],
-    ['陈同学', 'dark', '两条光路都没有被挡住。如果 A 口变暗，B 口应该接收这部分能量。'],
-    ['吴同学', 'half', '最后一块分束镜是五五分，我猜两个出口还是各有一半。'],
-    ['周同学', 'dark', '波峰和波谷相遇后会抵掉。我不知道被抵掉的光还能去哪里。'],
-    ['郑同学', 'dark', '相消只描述 A 口。B 口收到的两路振幅可能恰好同相。'],
-    ['许同学', 'a', '光路没有改，我觉得光应该继续走原来的出口。'],
-    ['唐同学', 'dark', 'B 口会亮。我想测两个出口的光强之和是否等于入射光强。'],
-    ['顾同学', 'dark', '我觉得只有 A 口的数据还不足以知道 B 口会怎样。'],
-    ['叶同学', 'dark', 'A、B 两口应此消彼长。我想同时记录两口。'],
+  "mzi": [
+    [
+      "林同学",
+      "dark",
+      "A 应该对，谷底像二极管把负半周截断，所以出现二倍频。"
+    ],
+    [
+      "陈同学",
+      "dark",
+      "cos(π+δ) 的二次项导致 sin² 倍频；振幅和差平方比给 ER 约 15.3 dB。"
+    ],
+    [
+      "吴同学",
+      "valley",
+      "暗背景噪声低，放谷底线性度最好；3 dB 损耗不至于让 ER 低于 25 dB。"
+    ],
+    [
+      "周同学",
+      "dark",
+      "我选 A，因为两臂抵掉的能量凭空消失了，剩下的才是倍频信号。"
+    ],
+    [
+      "郑同学",
+      "dark",
+      "两臂振幅 1 与约 0.707 不等，和差平方比给 ER 约 15.3 dB；偶函数二次项让基频消失。"
+    ],
+    [
+      "许同学",
+      "peak",
+      "0° 光最强，输出越大应当越线性；功率少一半，ER 就是 3 dB。"
+    ],
+    [
+      "唐同学",
+      "dark",
+      "正交点斜率最大；谷底的二次项产生 2f，静态 ER 按振幅差平方算约 15.3 dB。"
+    ],
+    [
+      "顾同学",
+      "dark",
+      "正弦负半波被二极管削波，像半波整流，故我赞成 A。"
+    ],
+    [
+      "叶同学",
+      "proportional",
+      "单臂功率少一半，总输出变 0.75 倍；整条曲线等比缩小，谷底仍为零。"
+    ],
+    [
+      "赵同学",
+      "dark",
+      "π 处一次导数为零，偶函数二次项 sin² 含直流和 2f；振幅和差平方比给 ER 约 15.3 dB。"
+    ],
+    [
+      "何同学",
+      "dark",
+      "A 对，调制器像半波截断器削掉负半周，所以正负两段都变成亮脉冲。"
+    ],
+    [
+      "沈同学",
+      "valley",
+      "要提高调制深度就必须靠近全暗谷底；ER 高低应该不受损耗影响。"
+    ]
   ],
-  history: [
-    ['林同学', 'poster', '既然有一百多人报名，到课六十人听起来很合理。'],
-    ['陈同学', 'roll', '点名册里第一晚只有 42 人，所以至少这一晚不符合原来的说法。'],
-    ['吴同学', 'memory', '学员在场，满座应该比教员在纸上写的数字更可信。'],
-    ['周同学', 'roll', '这五天有四天低于 60 人。不过我们不能据此计算整个秋季的平均人数。'],
+  "rc-fault": [
+    [
+      "林同学",
+      "bode",
+      "时域看不出来，网络分析仪多扫几个频点就能分别拟合 R 和 C。"
+    ],
+    [
+      "陈同学",
+      "current",
+      "两故障 τ 都是 2 μs；瞬间电流分别 0.25、0.50 mA，可独立约束 R。"
+    ],
+    [
+      "吴同学",
+      "early",
+      "完整波形比一个点信息多，做非线性拟合应能把 R、C 都解出来。"
+    ],
+    [
+      "周同学",
+      "bode",
+      "波特图同时有幅度和相位，两个曲线足够解两个未知量。"
+    ],
+    [
+      "郑同学",
+      "current",
+      "电压传函只含 RC；V꜀(0⁺)=0，i(0⁺)=5/R，电流测量打破参数简并。"
+    ],
+    [
+      "许同学",
+      "steady",
+      "充稳电压应该随电容容量变化，200 pF 的最终电压会低一点。"
+    ],
+    [
+      "唐同学",
+      "current",
+      "RC 同为 2 μs，带宽同为 79.58 kHz；初始电流却由电阻单独决定。"
+    ],
+    [
+      "顾同学",
+      "early",
+      "2 μs 点应该正好落在两个响应的分叉处。"
+    ],
+    [
+      "叶同学",
+      "bode",
+      "仪器带宽够高就不存在时域的简并，频域能分。"
+    ],
+    [
+      "赵同学",
+      "current",
+      "先算两种假设的初始电流再测；示波器记录更长的电压曲线仍只约束乘积。"
+    ],
+    [
+      "何同学",
+      "bode",
+      "−3 dB 截止点一定随电阻和电容的故障类别分别移动。"
+    ],
+    [
+      "沈同学",
+      "current",
+      "改变观测量比增加电压采样更关键，0.25 与 0.50 mA 是可分的预测。"
+    ]
   ],
-  blackbox: [
-    ['林同学', 'three', '输入 3 时，平方得 9，乘以 2 则得 6。'],
-    ['陈同学', 'two', '之前试过 2，用同一个数字应该更保险，也可以知道是不是平方。'],
-    ['吴同学', 'claim', '2 的平方刚好是 4，已经可以确认机器在算平方了。'],
-    ['周同学', 'three', '两条规则只要在某个输入上给出不同预测，机器的回答就能排除其中一条。'],
-  ],
+  "optical-aliasing": [
+    [
+      "林同学",
+      "occam",
+      "三个数据点已经零误差，最简模型应该就是真实器件。"
+    ],
+    [
+      "陈同学",
+      "180",
+      "两模型在 180° 预测为 0 与 1，相差 100 个百分点，能证伪其一。"
+    ],
+    [
+      "吴同学",
+      "120",
+      "先把已知点重复测准，训练误差更小后就能确定周期。"
+    ],
+    [
+      "周同学",
+      "360",
+      "测量跨度越大信息越多，所以盲测 360°。"
+    ],
+    [
+      "郑同学",
+      "180",
+      "训练零误差只说明相容；应挑模型预测分歧最大而非测量跨度最大的角。"
+    ],
+    [
+      "许同学",
+      "occam",
+      "单周期参数少，用奥卡姆原则即可排除二倍频。"
+    ],
+    [
+      "唐同学",
+      "180",
+      "在公共交点再采样不会破简并，180° 是预测最大的分歧点。"
+    ],
+    [
+      "顾同学",
+      "360",
+      "两倍周期一定会在扫描终点比单周期多一个峰，测终点最方便。"
+    ],
+    [
+      "叶同学",
+      "120",
+      "复测能降低噪声，所以必能消除谱形混叠。"
+    ],
+    [
+      "赵同学",
+      "180",
+      "不看真值先登记预测，再盲测；验证集应包含未参与拟合的判别点。"
+    ],
+    [
+      "何同学",
+      "occam",
+      "RMS 为零意味着模型足够准确，无需额外盲测。"
+    ],
+    [
+      "沈同学",
+      "180",
+      "0、120、240° 同时符合两个谐波模型，180° 才有区分力。"
+    ]
+  ]
 };
 
 const demoMziGuesses = [0.95, 0.8, 0.56, 0.22, 0.32, 0.12, 0.47, 0.87, 0.98];
-
 const lessonGuidance = {
-  mzi: {
-    focusOption: 'dark',
-    branch: 'energy',
-    contrast: '对照 A 口相消的解释与对 B 口的预测，再用两口的总光强检验。',
+  "mzi": {
+    "focusOption": "dark",
+    "branch": "energy",
+    "contrast": "同选正确选项也可能混淆偶函数二次项与半波截断；用谐波和双端读数核对理由。"
   },
-  history: {
-    focusOption: 'poster',
-    branch: 'purpose',
-    contrast: '对照报名人数与实际到课人数，核对每份材料可支持的主张。',
+  "rc-fault": {
+    "focusOption": "bode",
+    "branch": "degeneracy",
+    "contrast": "完整波形与波特图都只约束 RC，需改用独立约束 R 的初始电流。"
   },
-  blackbox: {
-    focusOption: 'two',
-    branch: 'same',
-    contrast: '比较重复输入 2 和改用输入 3 时，两条规则各自会怎样预测。',
-  },
+  "optical-aliasing": {
+    "focusOption": "occam",
+    "branch": "blind",
+    "contrast": "零训练误差不能证明模型正确，先锁定竞争预测再做 180° 盲测。"
+  }
 };
 
 function fail(message) {
@@ -84,9 +247,25 @@ function validateLesson(input) {
     if (!Array.isArray(items) || items.length > 12) fail(field + '数量超出范围。');
     return items.map((item) => clean(item, 180, field));
   };
+  if (input.moduleConfig !== undefined || !['choice@1','mzi-phase@1','rc-degeneracy@1','spectral-aliasing@1'].includes(activity.id)) validateModulePayload(activity.id, input.moduleConfig);
+  if (input.correctOptionId != null && !input.options?.some(o => o.id === input.correctOptionId)) fail('标准答案须对应选项。');
+  if (activity.id === 'step-fault@1' && (input.correctOptionId !== input.moduleConfig.faultStepId || input.options.some(o => !input.moduleConfig.steps.some(s => s.id === o.id)) || !input.options.some(o => o.id === input.moduleConfig.faultStepId))) fail('找茬选项与步骤编号不匹配。');
+  const sourceTakeaway=input.takeaway??input.moduleConfig?.takeaway;
+  let takeaway;
+  if(sourceTakeaway){
+    if(typeof sourceTakeaway!=='object'||Array.isArray(sourceTakeaway))fail('速查卡格式无效。');
+    takeaway={pitfall:clean(sourceTakeaway.pitfall,900,'易错提醒'),
+      ...(sourceTakeaway.formula!==undefined&&{formula:clean(sourceTakeaway.formula,1500,'速查公式')}),
+      ...(sourceTakeaway.summary!==undefined&&{summary:clean(sourceTakeaway.summary,900,'速查总结')})};
+    if(!takeaway.formula&&!takeaway.summary)fail('速查卡需要公式或总结。');
+  }
   return {
     id,
     activityId: activity.id,
+    ...(input.correctOptionId !== undefined && {correctOptionId: input.correctOptionId}),
+    ...(input.moduleConfig && {moduleConfig: clone(input.moduleConfig)}),
+    ...(input.evidenceIds && {evidenceIds: clone(input.evidenceIds)}),
+    ...(input.sourceEvidence && {sourceEvidence: clone(input.sourceEvidence)}),
     title: clean(input.title, 100, '课程标题'),
     subject: clean(input.subject, 80, '学科', false),
     description: clean(input.description, 500, '课程简介', false),
@@ -98,19 +277,13 @@ function validateLesson(input) {
       id: clean(item?.id, 64, '分支编号'),
       title: clean(item?.title, 120, '分支标题'),
       description: clean(item?.description, 700, '分支说明'),
+      ...(item?.evidenceIds && { evidenceIds: clone(item.evidenceIds) }),
       ...(item?.revisionPrompt && { revisionPrompt: clean(item.revisionPrompt, 700, '改答问题') }),
-      ...(Array.isArray(item?.evidenceIds) && item.evidenceIds.length && {
-        evidenceIds: [...new Set(item.evidenceIds.slice(0, 6).map((ref) => clean(ref, 16, '引用编号')))],
-      }),
     })),
-    ...(Array.isArray(input.materials) && input.materials.length && {
-      materials: unique(input.materials, '编号材料', 1, 12, (item) => ({
-        id: clean(item?.id, 16, '材料编号'),
-        text: clean(item?.text, 2200, '材料原文'),
-      })),
-    }),
     skills: notes(input.skills, '能力目标'),
     steps: notes(input.steps, '课堂步骤'),
+    ...((input.quickReasons ?? input.moduleConfig?.quickReasons) && { quickReasons: notes(input.quickReasons ?? input.moduleConfig.quickReasons, '快选理由') }),
+    ...(takeaway && { takeaway }),
   };
 }
 
@@ -139,16 +312,15 @@ function startLesson(lesson) {
     revisionPrompt: null,
     decision: null,
     analysis: null,
+    firstRoundAnalysis: null,
     winner: null,
-    winnerVisible: false,
-    spotlight: [],
-    timer: null,
+    aiPeerRevealed: false,
   };
 }
 
 export { record as recordRoomEvent, startLesson as initialLessonState };
 
-export function createRoom({ code = 'SHOW26', lessonId = 'mzi', demo = false, at } = {}) {
+export function createRoom({ code = 'SHOW26', lessonId = 'four-spaces', demo = false, at } = {}) {
   const lesson = resolveLesson(lessonId);
   if (!lesson) fail('找不到这门课。');
   const room = record({
@@ -170,7 +342,7 @@ function responseEvidence(state, response) {
   return {
     id: response.id,
     text: student + ' ' + String(participantIndex + 1).padStart(2, '0') +
-      ' · 第' + response.round + '轮 · 选择「' + current.label + '」' +
+      ' · 第' + response.round + '轮 · 选择「' + (current?.label ?? response.optionId) + '」' +
       (response.reason ? '：「' + response.reason.slice(0, 100) + (response.reason.length > 100 ? '…' : '') + '」' : ''),
     simulated: response.simulated,
     responseId: response.id,
@@ -187,6 +359,50 @@ function mziExplanation(reason) {
     /B\s*(?:口|端)?(?:会|就|应该|仍然)?(?:亮起来|亮|变亮|相长|接收|得到)|(?:转移|转|去|流|改走|集中)(?:到了?|向)?\s*B\s*(?:口|端)?/iu.test(clause));
   if (lost === transferred) return null;
   return lost ? 'lost' : 'transferred';
+}
+
+function reasoningTone(reason, scene) {
+  const clauses = reason.split(/[，。！？；,.!?;\n]/u).filter(c => !/不是|并非|不能说|不代表|不确定|不知道|是否|未必|不一定/u.test(c));
+  const text = clauses.join('；');
+  if (scene === 'mzi') {
+    if (/半波|二极管|削波|(?:能量|光能).{0,8}(?:消失|抵消)/u.test(text)) return 'alert';
+    if (/二次项|偶函数|振幅.{0,15}(?:平方|差)|15[.．]3/u.test(text)) return 'insight';
+  } else if (scene === 'rc-fault') {
+    if (/(?:波特|频域|完整波形|拟合).{0,20}(?:一定|能分|足够解|解出来)|越多/u.test(text)) return 'alert';
+    if (/只(?:含|约束)|简并|初始电流|瞬间电流|0[.．]25/u.test(text)) return 'insight';
+  } else if (scene === 'optical-aliasing') {
+    if (/最简.{0,12}(?:真|排除)|零误差.{0,15}(?:意味|真实|证明)|跨度越大/u.test(text)) return 'alert';
+    if (/证伪|分歧|区分力|盲测|相差.{0,8}100/u.test(text)) return 'insight';
+  }
+  if (/必然|一定|直接证明|已经证明|无需验证|足以确认/u.test(text)) return 'alert';
+  if (/不足以|不能证明|还需要|还需|未必|独立证据/u.test(text)) return 'insight';
+  return null;
+}
+
+function representativePair(sample, scene, lesson) {
+  const withReasons = sample.filter(r => r.reason?.trim());
+  if (lesson.activityId === 'step-fault@1' && lesson.moduleConfig?.artifactLang === 'code') {
+    const flawed = withReasons.find(r => r.optionId !== lesson.correctOptionId && /NULL|打印|读取|赋值/u.test(r.reason));
+    const sound = withReasons.find(r => r.optionId === lesson.correctOptionId && /解引用|有效.*对象/u.test(r.reason));
+    if (flawed && sound) return [flawed, sound];
+  }
+  if(lesson.activityId==='concept-diagnosis@1') {
+    const assumptions=withReasons.filter(r=>/我把|我觉得|我认为|等同于/u.test(r.reason));
+    for(const assumption of assumptions) {
+      const contrast=withReasons.find(r=>r.optionId===assumption.optionId&&r.reason!==assumption.reason&&!/我把|我觉得|我认为|等同于/u.test(r.reason));
+      if(contrast)return [assumption,contrast];
+    }
+  }
+  const alert = withReasons.find(r => reasoningTone(r.reason, scene) === 'alert');
+  const insight = withReasons.find(r => reasoningTone(r.reason, scene) === 'insight');
+  if (alert && insight) return [alert, insight];
+  const first = withReasons[0];
+  if (!first) return [];
+  const opposite = withReasons.find(r => r.optionId !== first.optionId);
+  // Different unclassified reasons are not asserted to be logically contradictory.
+  if (!opposite) return [];
+  return reasoningTone(first.reason, scene) === 'insight' || reasoningTone(opposite.reason, scene) === 'alert'
+    ? [opposite, first] : [first, opposite];
 }
 
 export function analyze(state) {
@@ -248,6 +464,16 @@ export function analyze(state) {
       selected.splice(0, selected.length, predictsLost, predictsTransfer, ...otherChoices);
     }
   }
+  const pair = representativePair(sample, activity?.scene, state.lesson);
+  if (pair.length === 2) {
+    contrastEvidenceIds = pair.map(r => r.id);
+    selected.splice(0, selected.length, ...pair, ...selected.filter(r => !pair.includes(r)));
+    if (activity?.scene === 'mzi' && pair[0].optionId === 'dark' && pair[1].optionId === 'dark') {
+      headline = '同选 A，物理机制却相反';
+      summary += '一条原话用半波截断或能量消失解释，另一条指出二次项倍频与振幅差；选对选项不等于掌握机制。';
+    }
+    else if(pair[0].optionId===pair[1].optionId){headline='同选一项，理由仍需对撞核验';summary+='两份相同选择包含不同前提；选项一致不能证明理解一致。';}
+  }
   const chosen = new Set(selected.map(({ id }) => id));
   for (const response of sample) {
     if (selected.length === 6) break;
@@ -258,61 +484,22 @@ export function analyze(state) {
     summary,
     evidence: selected.map((response) => responseEvidence(state, response)),
     ...(contrastEvidenceIds && { contrastEvidenceIds }),
+    contrastPair: pair.map((response, index) => ({
+      sideLabel: (index===0?'待核验解释':'对照解释（同样需证据）')+' · 选择 '+String.fromCharCode(65+state.lesson.options.findIndex(o=>o.id===response.optionId)),
+      tone: index === 0 ? 'alert' : 'insight', quote: response.reason,
+    })),
     branches: clone(state.lesson.branches),
     recommendedId: focus && reasonCount > 1 ? focus.branch : state.lesson.branches[0].id,
     source: 'local',
   };
 }
 
-export function analysisCandidates(state, limit = 48) {
-  const live = [];
-  const simulated = [];
-  for (const response of state.responses) {
-    if (response.round === state.round) (response.simulated ? simulated : live).push(response);
-  }
-  const sample = live.length ? live : simulated;
-  if (!sample.length) return [];
-  const buckets = new Map(state.lesson.options.map(({ id }) => [id, []]));
-  for (const response of sample) {
-    const list = buckets.get(response.optionId);
-    if (list) list.push(response);
-  }
-  for (const list of buckets.values()) {
-    list.sort((a, b) => Number(Boolean(b.reason?.trim())) - Number(Boolean(a.reason?.trim())));
-  }
-  const chosen = [];
-  const seen = new Set();
-  const fallback = analyze(state);
-  for (const item of fallback.evidence) {
-    const original = sample.find((r) => r.id === item.id);
-    if (original && !seen.has(original.id)) {
-      seen.add(original.id);
-      chosen.push(original);
-    }
-  }
-  const lists = [...buckets.values()];
-  let progress = true;
-  while (chosen.length < limit && progress) {
-    progress = false;
-    for (const list of lists) {
-      while (list.length && seen.has(list[0].id)) list.shift();
-      if (!list.length) continue;
-      const next = list.shift();
-      seen.add(next.id);
-      chosen.push(next);
-      progress = true;
-      if (chosen.length >= limit) break;
-    }
-  }
-  return chosen.map((response) => responseEvidence(state, response));
-}
-
-function validateProviderAnalysis(provider, fallback, candidates = fallback.evidence) {
+function validateProviderAnalysis(provider, fallback) {
   if (!provider || typeof provider !== 'object') fail('收到的分析格式无效。');
-  const validIds = new Map([...fallback.evidence, ...candidates].map((item) => [item.id, item]));
+  const validIds = new Map(fallback.evidence.map((item) => [item.id, item]));
   const recommendedId = provider.recommendedId ?? fallback.recommendedId;
   if (!fallback.branches.some(({ id }) => id === recommendedId)) fail('分析推荐了不存在的分支。');
-  if (!validIds.size) return fallback;
+  if (!fallback.evidence.length) return fallback;
   if (!Array.isArray(provider.evidence) || provider.evidence.length < 1 || provider.evidence.length > 6) {
     fail('分析须引用本轮已提交的课堂证据。');
   }
@@ -325,34 +512,11 @@ function validateProviderAnalysis(provider, fallback, candidates = fallback.evid
     ids.add(original.id);
     return original;
   });
-  let clusters;
-  if (provider.clusters !== undefined) {
-    if (!Array.isArray(provider.clusters)) fail('观点聚类格式无效。');
-    const kept = [];
-    for (const cluster of provider.clusters) {
-      if (!cluster || typeof cluster !== 'object') continue;
-      const label = typeof cluster.label === 'string' ? cluster.label.trim().slice(0, 48) : '';
-      const summary = typeof cluster.summary === 'string' ? cluster.summary.trim().slice(0, 180) : '';
-      if (!label || !summary || !Array.isArray(cluster.evidenceIds)) continue;
-      const uniqueRefs = [...new Set(cluster.evidenceIds.filter((id) => validIds.has(id)))].slice(0, 6);
-      if (!uniqueRefs.length) continue;
-      kept.push({ label, summary, evidenceIds: uniqueRefs });
-      if (kept.length >= 4) break;
-    }
-    if (kept.length) clusters = kept;
-  }
-  const headline = typeof provider.headline === 'string' && provider.headline.trim()
-    ? clean(provider.headline, 80, '诊断结论') : fallback.headline;
-  const summary = typeof provider.summary === 'string' && provider.summary.trim()
-    ? clean(provider.summary, 280, '诊断说明') : fallback.summary;
-  const contrast = (fallback.contrastEvidenceIds ?? []).map((id) => validIds.get(id)).filter(Boolean);
+  const contrast = (fallback.contrastEvidenceIds ?? []).map((id) => validIds.get(id));
   const required = new Set(contrast.map(({ id }) => id));
   return {
     ...fallback,
-    headline,
-    summary,
     evidence: [...contrast, ...evidence.filter(({ id }) => !required.has(id))].slice(0, 6),
-    ...(clusters && { clusters }),
     recommendedId,
     source: 'provider',
   };
@@ -360,27 +524,62 @@ function validateProviderAnalysis(provider, fallback, candidates = fallback.evid
 
 function fillDemo(state, at) {
   if (state.phase !== 'collect') fail('请在作答阶段加入模拟样本。');
-  const answers = demoAnswers[state.lessonId];
+  const config = state.lesson.moduleConfig ?? {};
+  const steps = config.steps ?? [];
+  const faultIndex = steps.findIndex(s => s.id === config.faultStepId);
+  const fault = steps[faultIndex];
+  // Contract ids, rather than a course name or S1, determine the simulated split.
+  // Twelve explicitly simulated learners give 5/4/3 (42/33/25 after rounding).
+  const distractors = steps.filter(s => s.id !== fault?.id && state.lesson.options.some(o => o.id === s.id))
+    .sort((a,b) => Math.abs(steps.indexOf(a)-faultIndex)-Math.abs(steps.indexOf(b)-faultIndex));
+  // In the swap example, contrast the NULL initialization with the later read.
+  // Both are plausible competing explanations of the first invalid write.
+  if (fault && /\*temp\s*=\s*\*px/.test(fault.content)) {
+    const laterRead = distractors.find(s => /\*py\s*=\s*\*temp/.test(s.content));
+    if (laterRead) distractors.splice(1, 0, distractors.splice(distractors.indexOf(laterRead), 1)[0]);
+  }
+  const stepAnswers = state.lesson.activityId === 'step-fault@1' && fault && distractors.length
+    ? Array.from({length:12}, (_,i) => {
+      const step = i < 5 ? fault : i < 9 ? distractors[0] : (distractors[1] ?? distractors[0]);
+      const reason = i < 5 ? ((config.quickReasons??[]).find(r=>r.includes(`第 ${fault.line} 行`)&&r.includes('首次')) ?? config.faultDiagnosis ?? `首次不成立的是第 ${fault.line} 步：${fault.content}`)
+        : `我认为第 ${step.line} 行 / 步「${step.content}」已经不成立；需要与首次失效步骤的前提逐项比较。`;
+      return ['模拟同学'+(i+1), step.id, reason];
+    }) : null;
+  const answers = stepAnswers ?? demoAnswers[state.lessonId] ?? Array.from({length:12}, (_,i) => [
+    '模拟同学'+(i+1), state.lesson.options[(i < 6 ? 0 : i % state.lesson.options.length)].id,
+    (state.lesson.quickReasons ?? state.lesson.moduleConfig?.quickReasons ?? ['需要核对原页证据'])[i % (state.lesson.quickReasons?.length || state.lesson.moduleConfig?.quickReasons?.length || 1)]
+  ]);
   if (!Array.isArray(answers)) fail('这门课没有预设的模拟样本。');
-  const participants = [...state.participants];
-  const responses = [...state.responses];
-  answers.forEach(([name, optionId, reason], index) => {
+  if (answers.some(([, id]) => !state.lesson.options.some(option => option.id === id))) {
+    fail('此存档使用旧版题目，请新建专业课课堂后演示模拟班级。');
+  }
+  const participants = [...state.participants], responses = [...state.responses];
+  let changed = 0;
+  answers.forEach(([name, firstOption, firstReason], index) => {
     const id = 'demo-' + state.lessonId + '-' + (index + 1);
-    if (!participants.some((participant) => participant.id === id)) participants.push({ id, name, simulated: true });
-    if (!responses.some((response) => response.participantId === id && response.round === state.round)) {
-      const sample = state.lessonId === 'mzi'
-        ? { phaseIndex: index, power: demoMziGuesses[index] }
-        : undefined;
-      responses.push({
-        ...(sample && { sample }),
-        id: 'response-' + (state.version + 1) + '-' + (index + 1),
-        participantId: id, optionId, reason, round: state.round, simulated: true,
-      });
-    }
+    if (!participants.some(p => p.id === id)) participants.push({ id, name, simulated: true });
+    const revised = state.round === 2 && index < 11;
+    const correctId = state.lesson.correctOptionId || state.lesson.options[0].id;
+    const optionId = revised ? correctId : state.round === 2 ? (stepAnswers ? distractors[0].id : state.lesson.options.find(o => o.id !== correctId).id) : firstOption;
+    const reason = revised ? ({
+      mzi: '复核示波与 DFT 后，谷底由偶函数二次项倍频，并非半波截断；两臂振幅差使 ER 约 15.3 dB。',
+      'rc-fault': '复核后确认时域与频域只含 RC；i(0⁺)=5/R 可分辨 0.25 与 0.50 mA，唯一测量选电流。',
+      'optical-aliasing': '盲测 180° 的竞争预测为 0% 与 100%；三点训练零误差不能证明真实阶次。',
+    })[state.lessonId] ?? ('复核原页后：'+(state.lesson.moduleConfig?.faultDiagnosis || state.lesson.moduleConfig?.takeaway?.summary || '判断须说明证据与边界。')) : state.round === 2 ? '我仍认为原来的直觉成立，还想用更多相同类型的观测确认它。' : firstReason;
+    const phaseIndex = index % 9;
+    const sample = state.lessonId === 'mzi' ? { phaseIndex, power: (revised || (state.round === 1 && [1, 4, 6, 9].includes(index)))
+      ? mzmTransfer({ lossDb: 3, phaseDeg: phaseIndex * 45 }).PA : demoMziGuesses[phaseIndex] } : undefined;
+    const prior = responses.find(r => r.participantId === id && r.round === state.round);
+    if (prior && !prior.simulated) return;
+    const response = { id: prior?.id ?? 'response-' + (state.version + 1) + '-' + (index + 1),
+      participantId: id, optionId, reason, round: state.round, simulated: true, ...(sample && { sample }) };
+    if (prior && JSON.stringify(prior) === JSON.stringify(response)) return;
+    if (prior) responses[responses.indexOf(prior)] = response; else responses.push(response);
+    changed++;
   });
-  if (responses.length === state.responses.length) return state;
+  if (!changed) return state;
   return record({ ...state, demo: true, participants, responses }, 'demoFill', '已加入模拟作答', {
-    count: responses.length - state.responses.length, simulated: true, round: state.round,
+    count: changed, simulated: true, round: state.round,
   }, at);
 }
 
@@ -408,7 +607,7 @@ export function reduceRoom(state, { type, payload = {} }) {
   if (!payload || typeof payload !== 'object') fail('课堂操作参数无效。');
   if ((payload.expectedRound !== undefined && payload.expectedRound !== state.round)
       || (payload.expectedLessonId !== undefined && payload.expectedLessonId !== state.lessonId)) {
-    fail('课堂已进入新的课谱或轮次，请按照当前题目重新操作。');
+    fail('课堂已进入新的互动配置或轮次，请按照当前题目重新操作。');
   }
   const { at } = payload;
   const transition = (patch, label, detail = null) => record({ ...state, ...patch }, type, label, detail, at);
@@ -428,16 +627,6 @@ export function reduceRoom(state, { type, payload = {} }) {
         ? state.participants.map((item) => item.id === id ? participant : item)
         : [...state.participants, participant];
       return transition({ participants }, existing ? '同学更新了显示名' : '有同学加入课堂', { participantId: id });
-    }
-    case 'removeParticipant': {
-      const id = clean(payload.participantId, 100, '学员编号');
-      const existing = state.participants.find((participant) => participant.id === id);
-      if (!existing || existing.simulated) fail('只能清理未提交作答的现场在线记录。');
-      if (state.responses.some((response) => response.participantId === id)) {
-        fail('该同学已提交作答记录，不能移除。');
-      }
-      const participants = state.participants.filter((participant) => participant.id !== id);
-      return transition({ participants }, '已清理未作答的重复加入记录', { participantId: id });
     }
     case 'respond': {
       requirePhase('collect');
@@ -466,93 +655,44 @@ export function reduceRoom(state, { type, payload = {} }) {
         : [...state.responses, response];
       return transition({ responses }, existing ? '一份作答已更新' : '收到一份作答', { responseId: response.id, round: state.round });
     }
+    case 'toggleAiPeer':
+      if (state.lesson.activityId !== 'evidence-weighing@1') fail('当前模块没有 AI 辩友。');
+      return transition({aiPeerRevealed: !state.aiPeerRevealed}, '教师切换了 AI 辩友观点');
     case 'reveal':
       if (state.phase === 'reveal') return state;
       requirePhase('collect');
-      return transition({ phase: 'reveal', timer: null }, '本轮作答已公布', { round: state.round });
+      return transition({ phase: 'reveal' }, '本轮作答已公布', { round: state.round });
     case 'analyze': {
       requirePhase('reveal', 'branch');
       const fallback = analyze(state);
-      const candidates = payload.analysis === undefined ? fallback.evidence : analysisCandidates(state, 48);
-      const analysis = payload.analysis === undefined ? fallback : validateProviderAnalysis(payload.analysis, fallback, candidates);
+      const analysis = payload.analysis === undefined ? fallback : validateProviderAnalysis(payload.analysis, fallback);
       if (JSON.stringify(analysis) === JSON.stringify(state.analysis)) return state;
       return transition({ analysis }, '已整理课堂证据', { source: analysis.source, evidenceIds: analysis.evidence.map(({ id }) => id) });
-    }
-    case 'spotlight': {
-      requirePhase('reveal', 'branch', 'closed');
-      if (!Array.isArray(payload.responseIds) || payload.responseIds.length > 2) {
-        fail('大屏最多同时对比展示 2 条匿名原话。');
-      }
-      const uniqueIds = [...new Set(payload.responseIds)];
-      if (uniqueIds.length !== payload.responseIds.length) fail('投屏原话编号不能重复。');
-      const spotlight = uniqueIds.map((id) => {
-        const response = state.responses.find((item) => item.id === id && item.round === state.round);
-        if (!response) fail('只能投屏本轮已提交的课堂作答。');
-        const reason = typeof response.reason === 'string' ? response.reason.trim() : '';
-        if (!reason) fail('这条作答没有填写文字理由。');
-        const option = state.lesson.options.find((item) => item.id === response.optionId);
-        return {
-          id: response.id,
-          optionId: response.optionId,
-          optionLabel: option?.label ?? response.optionId,
-          round: response.round,
-          text: reason.slice(0, 280),
-          simulated: Boolean(response.simulated),
-        };
-      });
-      if (JSON.stringify(spotlight) === JSON.stringify(state.spotlight ?? [])) return state;
-      return transition({ spotlight }, spotlight.length ? '已匿名投屏典型作答' : '已取消大屏作答对比', {
-        round: state.round,
-        count: spotlight.length,
-        evidenceIds: spotlight.map(({ id }) => id),
-      });
-    }
-    case 'spotlightWinner': {
-      if (!state.winner) fail('请先完成一次抽签。');
-      const visible = Boolean(payload.visible);
-      if (Boolean(state.winnerVisible) === visible) return state;
-      return transition({ winnerVisible: visible }, visible ? '已在大屏公布抽签结果' : '已隐藏大屏抽签结果', {
-        visible, participantId: state.winner.id,
-      });
-    }
-    case 'timer': {
-      requirePhase('collect', 'reveal', 'branch');
-      const rawSeconds = payload.seconds ?? payload.durationSec;
-      const seconds = rawSeconds == null ? 0 : Number(rawSeconds);
-      if (!Number.isInteger(seconds) || (seconds !== 0 && (seconds < 15 || seconds > 1800))) {
-        fail('计时时长须为 15 至 1800 秒。');
-      }
-      const startedAt = Number.isFinite(at) ? at : Date.now();
-      const timer = seconds ? { startedAt, seconds, durationSec: seconds, endsAt: startedAt + seconds * 1000 } : null;
-      if (!timer && !state.timer) return state;
-      return transition({ timer }, timer ? `已开启 ${Math.round(seconds / 60 * 10) / 10} 分钟倒计时` : '已结束倒计时', {
-        seconds, durationSec: seconds, endsAt: timer?.endsAt ?? null, round: state.round,
-      });
     }
     case 'branch': {
       if (state.phase === 'branch' && state.decision?.branchId === payload.branchId) return state;
       requirePhase('reveal', 'branch');
-      if (state.round !== 1) fail('教学分支须在第一轮公布后选择。');
+      if (state.round !== 1) fail('靶向教学策略须在第一轮公布后选择。');
       const branch = state.lesson.branches.find(({ id }) => id === payload.branchId);
       if (!branch) fail('请选择本课程的有效分支。');
       const analysis = state.analysis ?? analyze(state);
       const decision = { branchId: branch.id, title: branch.title, evidenceIds: analysis.evidence.map(({ id }) => id) };
-      return transition({ phase: 'branch', decision, analysis }, '已选择教学分支', decision);
+      return transition({ phase: 'branch', decision, analysis }, '已选择靶向教学策略', decision);
     }
     case 'revise': {
       if (state.round === 2 && state.phase === 'collect') return state;
       requirePhase('branch');
-      if (state.round !== 1 || !state.decision) fail('请先选定第一轮的教学分支。');
+      if (state.round !== 1 || !state.decision) fail('请先选定第一轮的靶向教学策略。');
       const branch = state.lesson.branches.find(({ id }) => id === state.decision.branchId);
       const revisionPrompt = branch.revisionPrompt ?? ('完成「' + branch.title + '」后，结合新证据重新回答题目。' + state.lesson.prompt);
-      return transition({ phase: 'collect', round: 2, analysis: null, spotlight: [], winnerVisible: false, timer: null, revisionPrompt }, '第二轮改答已开启', {
+      return transition({ phase: 'collect', round: 2, firstRoundAnalysis: state.analysis, analysis: null, revisionPrompt }, '第二轮改答已开启', {
         round: 2, branchId: branch.id, revisionPrompt,
       });
     }
     case 'close':
       if (state.phase === 'closed') return state;
       requirePhase('reveal', 'branch');
-      return transition({ phase: 'closed', timer: null }, '课堂已结束', { round: state.round });
+      return transition({ phase: 'closed' }, '课堂已结束', { round: state.round });
     case 'draw': {
       const candidates = drawCandidates(state);
       const eligibleCount = candidates.length;
@@ -566,7 +706,7 @@ export function reduceRoom(state, { type, payload = {} }) {
         eligibleSource: simulated ? 'simulated' : 'live',
         eligibleIds: candidates.map((participant) => participant.id),
       };
-      return transition({ winner, winnerVisible: false }, simulated ? '已从模拟作答者中抽签' : '已从提交作答的同学中抽签', detail);
+      return transition({ winner }, simulated ? '已从模拟作答者中抽签' : '已从提交作答的同学中抽签', detail);
     }
     case 'switchLesson': {
       const lesson = resolveLesson(payload.lessonId, state.customLessons);
@@ -574,7 +714,7 @@ export function reduceRoom(state, { type, payload = {} }) {
       if (state.lessonId === lesson.id && state.phase === 'collect' && state.round === 1) return state;
       const participants = state.participants.filter(({ simulated }) => !simulated);
       const next = transition({ ...startLesson(lesson), participants }, '已切换课程', { lessonId: lesson.id });
-      return state.demo && Array.isArray(demoAnswers[lesson.id]) ? fillDemo(next, at) : next;
+      return state.demo ? fillDemo(next, at) : next;
     }
     case 'loadLesson': {
       const lesson = validateLesson(payload.lesson);

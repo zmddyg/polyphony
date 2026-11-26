@@ -1,10 +1,14 @@
 node_modules/
 __pycache__/
+studio/artifacts/
 .env
 .env.*
 !.env.example
-.polyphony-rooms.json*
-.polyphony-rooms.db*
-.polyphony-rooms.sqlite*
+.polyphony-rooms.*
+*.sqlite-wal
+*.sqlite-shm
+*.db-wal
+*.db-shm
 .DS_Store
 Thumbs.db
+

@@ -28,7 +28,7 @@ test('a bound ended classroom contributes only real reason text with matching re
   const versionId = await makeMaterialVersionId({ bytes: '课堂讲义' });
   const pageNumber = 1;
   const command = (room, type, payload = {}) => reduceRoom(room, { type, payload: { ...payload, at: room.version + 10 } });
-  let room = createRoom({ code: 'ROOM01', demo: true, at: 100 });
+  let room = createRoom({ lessonId:'mzi', code: 'ROOM01', demo: true, at: 100 });
   room = command(room, 'join', { participantId: 'student-one', name: '姓名' });
   room = command(room, 'join', { participantId: 'student-two', name: '姓名' });
   room = command(room, 'respond', { participantId: 'student-one', optionId: 'dark', reason: '需要同时测两个输出。' });
@@ -48,7 +48,7 @@ test('a bound ended classroom contributes only real reason text with matching re
   assert.deepEqual(materialClassroomReasons({ ...room, code: 'ROOM02' }, binding), []);
   const reusedCode = { ...room, events: [{ ...room.events[0], at: 200 }, ...room.events.slice(1)] };
   assert.deepEqual(materialClassroomReasons(reusedCode, binding), []);
-  const sameLessonAgain = command(command(room, 'switchLesson', { lessonId: 'history' }), 'switchLesson', { lessonId: 'mzi' });
+  const sameLessonAgain = command(command(room, 'switchLesson', { lessonId: 'rc-fault' }), 'switchLesson', { lessonId: 'mzi' });
   assert.deepEqual(materialClassroomReasons({ ...sameLessonAgain, phase: 'closed' }, binding), []);
 });
 

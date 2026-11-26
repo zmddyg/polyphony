@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advanceChallenge, castVote, fitLight, fullCurveRms, initialSamples, lightAt, newChallenge, presetTarget, publicChallenge, rcReading } from '../dist/core/challenge-lab.mjs';
+import { advanceChallenge, castVote, fitLight, fullCurveRms, initialSamples, lightAt, newChallenge, presetTarget, publicChallenge, rcReading, offlinePeerSuggestion, peerEvidence } from '../dist/core/challenge-lab.mjs';
 import { applyRoomCommand, createLectureRoom } from '../dist/core/lecture-room.mjs';
 import { buildLectureScore } from '../dist/core/lecture-score.mjs';
 import { projectRoom } from '../dist/core/transport.mjs';
@@ -8,10 +8,10 @@ import { askExperimentPeer } from '../experiment-peer.mjs';
 
 test('one RC reading eliminates only circuits with different predictions', () => {
   for (const fault of ['r','c']) {
-    for (const value of ['early','steady','current']) {
+    for (const value of ['early','bode','steady','current']) {
       const state = {...newChallenge('rc'), fault};
       const measured = advanceChallenge(state,{action:'measure',value});
-      const observed = value === 'early' ? 5*(1-Math.exp(-1)) : value === 'steady' ? 5 : fault === 'r' ? .25 : .5;
+      const observed = value === 'early' ? 5*(1-Math.exp(-1)) : value === 'bode' ? 1 / (2 * Math.PI * 2e-6) / 1000 : value === 'steady' ? 5 : fault === 'r' ? .25 : .5;
       assert.ok(Math.abs(measured.reading-observed)<1e-12);
       assert.throws(()=>advanceChallenge(measured,{action:'measure',value:'current'}));
       const resolved = advanceChallenge(measured,{action:'diagnose',value:'open'});
@@ -58,14 +58,14 @@ test('class experiment votes can be revised, survive other votes, and expire at 
   assert.equal(castVote(state.experiment,'voter-a','current'),state.experiment);
   for (const role of ['teacher','stage','student']) {
     const visible=projectRoom(state,role,role==='student'?'voter-a':null).experiment;
-    assert.deepEqual(visible.counts,{early:0,steady:0,current:2});
+    assert.deepEqual(visible.counts,{early:0,bode:0,steady:0,current:2});
     assert.equal(visible.myVote,role==='student'?'current':null);
     assert.ok(!('fault' in visible) && !('votes' in visible));
   }
   state=send('lectureExperimentAct',{action:'measure',value:'early'});
   assert.throws(()=>send('experimentVote',{participantId:'voter-c',choice:'early',expectedLectureTurn:turn}));
   assert.equal(state.lecture.pageNumber,7);
-  assert.deepEqual(state.events.at(-1).detail.counts,{early:0,steady:0,current:2});
+  assert.deepEqual(state.events.at(-1).detail.counts,{early:0,bode:0,steady:0,current:2});
   state=send('lectureResume');
   assert.equal(state.lecture.mode,'slides');
   assert.equal(state.lecture.pageNumber,7);
@@ -87,4 +87,41 @@ test('the language model sees only class evidence and must choose an available o
   assert.deepEqual(await askExperimentPeer(state,provider),response);
   response={choice:'third-fault',reason:'另选一项。'};
   await assert.rejects(()=>askExperimentPeer(state,provider));
+});
+
+test('a Bode sweep remains degenerate but the instantaneous current is discriminating', () => {
+  assert.ok(Math.abs(rcReading('r','bode') - 79.58) < .1);
+  assert.equal(rcReading('r','bode'), rcReading('c','bode'));
+  assert.equal(rcReading('r','current'), .25); assert.equal(rcReading('c','current'), .5);
+  assert.ok(Math.abs(rcReading('r','early') - 3.16060279) < 1e-7);
+});
+
+test('refit reports order jumps and the restricted optical model family cannot fit a flat channel', () => {
+  for (const kind of ['double','flat']) {
+    let state = advanceChallenge(newChallenge('light'), {action:'fit',target:presetTarget(kind)});
+    state = advanceChallenge(state, {action:'test',value:'180'});
+    state = advanceChallenge(state, {action:'refit'});
+    assert.equal(state.refitRms, fullCurveRms(state.model,state.target));
+    assert.equal(state.orderJump, state.model.order !== state.firstModel.order);
+    assert.equal(state.degreeOfFreedomLimited, kind === 'flat');
+  }
+  let common = advanceChallenge(newChallenge('light'), {action:'fit',target:presetTarget('double')});
+  common = advanceChallenge(common, {action:'test',value:'360'});
+  assert.equal(common.observed, 1); assert.equal(common.predicted, 1);
+});
+
+test('offline blind peer uses only published evidence and is explicitly labelled', async () => {
+  const r = {...newChallenge('rc'),fault:'r'}, c = {...r,fault:'c'};
+  assert.deepEqual(peerEvidence(r), peerEvidence(c));
+  assert.deepEqual(offlinePeerSuggestion(r), offlinePeerSuggestion(c));
+  const peer = await askExperimentPeer(r);
+  assert.equal(peer.offlineDemo,true); assert.equal(peer.choice,'current');
+  assert.equal(peerEvidence(r).probes.length,4);
+  const measured = advanceChallenge(r,{action:'measure',value:'bode'});
+  assert.equal(offlinePeerSuggestion(measured).choice,'open');
+  const blind = advanceChallenge(newChallenge('light'),{action:'fit',target:presetTarget('double')});
+  const modified = {...blind,target:blind.target.map((v,i)=>initialSamples.includes(i)?v:1-v)};
+  assert.deepEqual(peerEvidence(blind),peerEvidence(modified));
+  assert.deepEqual(offlinePeerSuggestion(blind),offlinePeerSuggestion(modified));
+  assert.ok(!JSON.stringify(peerEvidence(blind)).includes('target'));
 });

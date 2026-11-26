@@ -12,7 +12,7 @@ import { projectRoom } from '../dist/core/transport.mjs';
 import { createPublicRoomEncoder } from '../room-broadcast.mjs';
 
 test('the shared SSE encoding preserves the individual view across rounds, old responses and votes', () => {
-  let room = createRoom({ demo: true });
+  let room = createRoom({ lessonId:'mzi', demo: true });
   const apply = (type, payload) => { room = reduceRoom(room, { type, payload }); };
   const compare = snapshot => {
     const encode = createPublicRoomEncoder(snapshot);
@@ -23,14 +23,14 @@ test('the shared SSE encoding preserves the individual view across rounds, old r
   apply('join', { participantId: 'a', name: '甲\n同学' });
   apply('join', { participantId: 'b', name: '乙同学' });
   apply('respond', { participantId: 'a', optionId: 'dark', reason: '首轮：A 口变暗', sample: { phaseIndex: 2, power: .4 } });
-  apply('respond', { participantId: 'b', optionId: 'half', reason: '首轮：两路等强' });
+  apply('respond', { participantId: 'b', optionId: 'valley', reason: '首轮：两路等强' });
   compare(room);
   apply('reveal');
   apply('branch', { branchId: 'energy' });
   apply('draw', { random: 0 });
   compare(room);
   apply('revise');
-  apply('respond', { participantId: 'a', optionId: 'a', reason: '改答：还有 B 口' });
+  apply('respond', { participantId: 'a', optionId: 'peak', reason: '改答：还有 B 口' });
   compare(room);
   compare({ ...room, responses: room.responses.toReversed() });
   apply('reveal');
@@ -100,7 +100,7 @@ test('SSE shares its heartbeat and sends the latest authorized snapshot after a 
   };
   const json = response => JSON.parse(response.payload);
   const cookie = response => response.headers.get('set-cookie').split(';', 1)[0];
-  const first = await request('/api/rooms', { demo: false });
+  const first = await request('/api/rooms', { demo: false, lessonId:'mzi' });
   const roomPath = '/api/rooms/' + json(first).room.code;
   const alice = cookie(await request(roomPath + '/session', { role: 'student' }));
   const bob = cookie(await request(roomPath + '/session', { role: 'student' }));

@@ -1,31 +1,22 @@
+import { moduleHtml, bindModule } from './module-renderer.mjs';
 import { curveGraphic } from '../core/optics.mjs';
 import { getActivity } from '../core/activities.mjs';
+import { renderCognitionReport, renderContrastWall } from './cognition.mjs';
+import { formatFormulaHtml } from '../core/formula-text.mjs';
 
 const phaseLabels = { collect: '收集中', reveal: '结果已公布', branch: '分支讨论', closed: '已结课' };
-const chartColors = ['#92acff', '#73dfcd', '#f6c681', '#d8a7fd', '#a1d0ff'];
+const chartColors = ['#22D3EE', '#34D399', '#FBBF24', '#FB7185', '#A5F3FC'];
 const renderedStages = new WeakMap();
-
-function formatCountdown(endsAt) {
-  const remaining = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
-  const mm = String(Math.floor(remaining / 60)).padStart(2, '0');
-  const ss = String(remaining % 60).padStart(2, '0');
-  return { remaining, text: remaining > 0 ? `${mm}:${ss}` : '时间到' };
-}
+const localPeers = new WeakMap();
 
 function summarize(state, collecting) {
   if (collecting && state.responseCount != null && state.simulatedResponseCount != null) {
-    return { count: state.responseCount, simulated: state.simulatedResponseCount, prevTotal: 0, prevCounts: new Map() };
+    return { count: state.responseCount, simulated: state.simulatedResponseCount };
   }
   const counts = new Map();
-  const prevCounts = new Map();
   let count = 0;
   let simulated = 0;
-  let prevTotal = 0;
   for (const response of state.responses) {
-    if (response.round === 1 && state.round >= 2) {
-      prevTotal++;
-      prevCounts.set(response.optionId, (prevCounts.get(response.optionId) ?? 0) + 1);
-    }
     if (response.round !== state.round) continue;
     count++;
     if (response.simulated) simulated++;
@@ -34,8 +25,6 @@ function summarize(state, collecting) {
   return {
     count: state.responseCount ?? count,
     simulated: state.simulatedResponseCount ?? simulated,
-    prevTotal,
-    prevCounts,
     options: collecting ? [] : state.lesson.options.map(option => ({ ...option, count: counts.get(option.id) ?? 0 })),
   };
 }
@@ -45,38 +34,15 @@ function choiceList(options, esc) {
     <li><span aria-hidden="true">${String.fromCharCode(65 + index)}</span><span>${esc(option.label)}</span></li>`).join('')}</ol>`;
 }
 
-function distribution({ count, options, prevTotal, prevCounts }, round, roundShift, esc) {
+function distribution({ count, options }, esc) {
   if (!count) return '<p class="stage-empty">本轮没有收到作答。</p>';
-  const shiftSummary = round >= 2 && roundShift
-    ? `<p class="stage-shift-summary">第 1 轮 → 第 2 轮：${roundShift.paired} 位同学完成两轮作答，其中 <strong>${roundShift.changed} 位</strong>改变了判断</p>`
-    : '';
-  return shiftSummary + `<ol class="stage-distribution" aria-label="作答分布">${options.map((option, index) => {
+  return `<ol class="stage-distribution" aria-label="作答分布">${options.map((option, index) => {
     const percent = Math.round(option.count / count * 100);
-    let deltaMarkup = '';
-    if (round >= 2 && prevTotal > 0) {
-      const prevPercent = Math.round((prevCounts.get(option.id) ?? 0) / prevTotal * 100);
-      const diff = percent - prevPercent;
-      deltaMarkup = `<small class="stage-delta ${diff > 0 ? 'is-up' : diff < 0 ? 'is-down' : ''}">首轮 ${prevPercent}%${diff ? ` (${diff > 0 ? '+' : ''}${diff}%)` : ''}</small>`;
-    }
     return `<li><span class="stage-option-letter" aria-hidden="true">${String.fromCharCode(65 + index)}</span>
       <div class="stage-option-result"><span>${esc(option.label)}</span>
       <div class="stage-result-track" aria-hidden="true"><span style="--ratio:${option.count / count * 100}%;--bar:${chartColors[index % chartColors.length]}"></span></div></div>
-      <div class="stage-result-count"><strong>${percent}%</strong><small>${option.count} 票</small>${deltaMarkup}</div></li>`;
+      <div class="stage-result-count"><strong>${percent}%</strong><small>${option.count} 票</small></div></li>`;
   }).join('')}</ol>`;
-}
-
-function spotlightMarkup(spotlight, options, esc) {
-  if (!Array.isArray(spotlight) || !spotlight.length) return '';
-  const letters = new Map(options.map((opt, idx) => [opt.id, String.fromCharCode(65 + idx)]));
-  return `<section class="stage-spotlight" aria-label="匿名原话对比">
-    <h3>匿名观点对比</h3>
-    <div class="stage-spotlight-grid${spotlight.length === 2 ? ' is-pair' : ''}">
-      ${spotlight.slice(0, 2).map(item => `<blockquote class="stage-quote">
-        <header><span class="stage-option-letter">${letters.get(item.optionId) ?? '•'}</span><strong>${esc(item.optionLabel || '')}</strong></header>
-        <p>${esc(item.text)}</p>
-      </blockquote>`).join('')}
-    </div>
-  </section>`;
 }
 
 function participation(count, total, compact) {
@@ -92,7 +58,7 @@ function stageCurve(state, collecting) {
   const simulated = samples.filter(sample => sample.simulated).length;
   return `<figure class="stage-curve">
     <div class="stage-axis">归一化光强</div>
-    ${curveGraphic(samples, { reveal: !collecting, showB, dark: true })}
+    ${curveGraphic(samples, { reveal: !collecting, showB, dark: true, lossDb: state.lesson.quickReasons?.length ? 3 : 0 })}
     <div class="stage-axis stage-axis-x">相位差 Δφ</div>
     <figcaption>
       ${samples.length > simulated || !simulated ? `<span><i class="stage-plot-dot"></i>现场预测 ${samples.length - simulated}</span>` : ''}
@@ -107,6 +73,8 @@ export function renderStage(root, ctx) {
   const { state, esc, icon } = ctx;
   if (!state?.lesson) return;
   const { lesson } = state;
+  const peer=localPeers.get(root);
+  const peerShown=peer&&peer.base===state.aiPeerRevealed&&peer.lessonId===lesson.id?peer.shown:state.aiPeerRevealed;
   const round = Number(state.round) || 1;
   const collecting = state.phase === 'collect';
   const isInterference = getActivity(lesson)?.scene === 'mzi';
@@ -118,33 +86,27 @@ export function renderStage(root, ctx) {
     ? `本轮 ${result.count - result.simulated} 份现场作答 · ${result.simulated} 份模拟作答`
     : joining ? (ctx.mode === 'local' ? '请教师在同一浏览器打开学生端。' : '可扫码或凭课堂码加入。') : `本轮共收到 ${result.count} 份作答`;
   const reconnecting = ctx.mode === 'server' && ctx.connected === false;
-  const winnerBanner = state.winnerDisplay
-    ? `<div class="stage-winner" role="status">${icon('users', 20)}<span>随机抽签 · 请发言</span><strong>${esc(state.winnerDisplay.name)}${state.winnerDisplay.simulated ? '（模拟）' : ''}</strong></div>`
-    : '';
-  const spotlightHtml = !collecting ? spotlightMarkup(state.spotlight, lesson.options, esc) : '';
   const regions = {
-    topic: `<div class="stage-meta"><span>${esc(lesson.subject || '课堂互动')}</span><span>第 ${round} 轮</span>${state.demo ? '<span class="stage-rehearsal">样本排练</span>' : ''}</div>
+    topic: `<div class="stage-meta"><span>${esc(lesson.subject || '课堂互动')}</span><span>第 ${round} 轮</span>${state.demo ? '<span class="stage-rehearsal">模拟班级演示</span>' : ''}</div>
         <h1 id="stage-lesson">${esc(lesson.title)}</h1>
-        <p class="stage-prompt">${esc(prompt)}</p>
-        ${collecting ? choiceList(lesson.options, esc) : ''}
-        ${selectedBranch ? `<div class="stage-decision"><span>讨论方向</span><strong>${esc(selectedBranch.title)}</strong>${state.phase === 'branch' ? `<p>${esc(selectedBranch.description)}</p>` : ''}</div>` : ''}
-        ${winnerBanner}`,
+        <p class="stage-prompt">${formatFormulaHtml(prompt)}</p>
+        ${lesson.activityId==='param-explorer@1'?'':moduleHtml(lesson,{...state,aiPeerRevealed:peerShown},{teacher:true})}${collecting ? choiceList(lesson.options, esc) : ''}
+        ${selectedBranch ? `<div class="stage-decision"><span>讨论方向</span><strong>${esc(selectedBranch.title)}</strong>${state.phase === 'branch' ? `<p>${esc(selectedBranch.description)}</p>` : ''}</div>` : ''}`,
     heading: `<h2 id="stage-panel-title">${isInterference ? '全班干涉曲线' : collecting ? '作答进度' : '作答分布'}</h2>
         <span class="stage-phase" data-phase="${esc(state.phase)}"><i aria-hidden="true"></i>${phaseLabels[state.phase] || ''}</span>`,
-    plot: isInterference ? stageCurve(state, collecting) : '',
+    plot: lesson.activityId==='param-explorer@1'?moduleHtml(lesson,state):isInterference ? stageCurve(state, collecting) : '',
     result: (isInterference && !collecting ? '<h3 class="stage-distribution-title">选项分布</h3>' : '') +
-      (collecting ? participation(result.count, state.participants.length, isInterference) : distribution(result, round, state.roundShift, esc)) +
-      spotlightHtml,
+      (collecting ? participation(result.count, state.participants.length, isInterference) : distribution(result, esc)),
     footer,
+    highlights: renderContrastWall(state, esc) + renderCognitionReport(state, esc),
   };
   let stage = renderedStages.get(root.firstElementChild);
   if (!stage || stage.code !== state.code) {
     root.innerHTML = `
       <div class="stage-page">
         <header class="stage-header">
-          <div class="stage-brand"><img src="./assets/mark.svg" alt=""><strong>共演</strong><span>课堂投影</span></div>
+          <div class="stage-brand"><img src="./assets/mark.svg" alt=""><strong>共演智课</strong><span>课堂投影</span></div>
           <div class="stage-actions">
-            <div class="stage-timer" data-stage-timer hidden role="timer" aria-live="off">${icon('clock', 18)}<strong></strong></div>
             <div class="stage-room"><span>课堂码</span><strong>${esc(state.code)}</strong></div>
             <button type="button" class="stage-control" data-invite data-focus="stage-invite" aria-label="邀请学生" title="邀请学生">${icon('scan', 19)}<span>邀请学生</span></button>
             <button type="button" class="stage-control" data-fullscreen data-focus="stage-fullscreen">${icon('maximize', 19)}<span>全屏</span></button>
@@ -160,6 +122,7 @@ export function renderStage(root, ctx) {
             <footer class="stage-foot" data-stage-region="footer">${regions.footer}</footer>
           </section>
         </div>
+        <div class="stage-highlights" data-stage-region="highlights">${regions.highlights}</div>
       </div>`;
     const fullscreen = root.querySelector('[data-fullscreen]');
     const fullscreenLabel = fullscreen.querySelector('span');
@@ -174,16 +137,10 @@ export function renderStage(root, ctx) {
       code: state.code,
       body: root.querySelector('.stage-body'),
       connection: root.querySelector('.stage-connection'),
-      timerEl: root.querySelector('[data-stage-timer]'),
-      timerText: root.querySelector('[data-stage-timer] strong'),
-      timerInterval: null,
       nodes: Object.fromEntries(Object.keys(regions).map(name => [name, root.querySelector(`[data-stage-region="${name}"]`)])),
       regions,
       paintFullscreen,
-      cleanup: () => {
-        document.removeEventListener('fullscreenchange', paintFullscreen);
-        if (stage.timerInterval) { clearInterval(stage.timerInterval); stage.timerInterval = null; }
-      },
+      cleanup: () => document.removeEventListener('fullscreenchange', paintFullscreen),
     };
     renderedStages.set(root.firstElementChild, stage);
     root.querySelector('[data-invite]').onclick = () => stage.ctx.invite();
@@ -204,23 +161,12 @@ export function renderStage(root, ctx) {
     stage.body.classList.toggle('stage-interference', isInterference);
     stage.regions = regions;
   }
-
-  if (stage.timerInterval) { clearInterval(stage.timerInterval); stage.timerInterval = null; }
-  if (state.timer?.endsAt) {
-    const paintTimer = () => {
-      const info = formatCountdown(state.timer.endsAt);
-      stage.timerEl.hidden = false;
-      stage.timerText.textContent = info.text;
-      stage.timerEl.classList.toggle('is-urgent', info.remaining <= 10);
-    };
-    paintTimer();
-    stage.timerInterval = setInterval(paintTimer, 500);
-  } else {
-    stage.timerEl.hidden = true;
-    stage.timerEl.classList.remove('is-urgent');
-  }
-
+  bindModule(root,lesson,{command:()=>{localPeers.set(root,{shown:!peerShown,base:state.aiPeerRevealed,lessonId:lesson.id});renderStage(root,ctx);}});
   stage.ctx = ctx;
+  root.firstElementChild.classList.toggle('has-highlights', Boolean(regions.highlights));
+  root.firstElementChild.classList.toggle('has-battle', Number(state.round) === 2 && Boolean(regions.highlights));
+  root.firstElementChild.dataset.activity=lesson.activityId??'choice@1';
+  root.firstElementChild.classList.toggle('has-peer',Boolean(root.querySelector('.module-peer')));
   stage.paintFullscreen();
   document.addEventListener('fullscreenchange', stage.paintFullscreen);
   return stage.cleanup;

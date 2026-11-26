@@ -1,28 +1,25 @@
 import { lectureModelPages, localLecturePlan, plannerPages } from './dist/core/lecture-planner.mjs';
 
-// TypeSafe System One: https://docs.typesafe.ai/api/system-one
+// Optional fast planning provider; endpoint and exported API remain compatible.
 const systemOneEndpoint = 'https://api.typesafe.ai/v1/systemone';
 const defaultModel = 'jev-latest';
-const defaultTimeoutMs = Number(process.env.POLYPHONY_JEV_TIMEOUT_MS) || 3200;
+const defaultTimeoutMs = 3200;
 const minimumConfidence = 0.55;
 const pagesPerRequest = 12;
 
 const criteria = {
-  rc: 'First-order resistor–capacitor charging or discharging with a constant source and one time constant.',
-  mzi: 'Balanced two-port Mach–Zehnder interference linking phase difference and redistribution of output power.',
-  history: 'Historical question with original sources or claims to compare and corroborate evidence.',
-  blackbox: 'Input–output number pattern where a new input distinguishes competing numerical rules.',
-  inquiry: 'Conceptual misconception, prediction, or discussion question in any subject suitable for whole-class voting.',
-  none: 'Title, contents, general discussion, or insufficient concrete material for an interactive activity.',
+  rc: 'Fast photodiode RC front-end, load resistance, capacitance, transient, rise time or bandwidth.',
+  mzi: 'MZI/MZM two-port interference, arm loss, bias point, static extinction ratio or harmonics.',
+  aliasing: 'Sparse optical-filter samples, spectral aliasing, model ambiguity and blind-test falsification.',
+  concept: 'Any professional-course concept, formula, engineering tradeoff or misconception. Includes TFLN traveling-wave velocity mismatch, diffraction, dispersion and resonances without a fixed simulation.',
+  none: 'Empty page, contents or insufficient course material.',
 };
 const kinds = Object.keys(criteria);
-
 const reasons = {
-  rc: '可用一阶 RC 例题复核初值、终值和时间常数。',
-  mzi: '可比较马赫–曾德尔干涉仪两端的功率，解释相位差带来的变化。',
-  history: '可让学生对照史料，核对不同说法的依据。',
-  blackbox: '可让学生用一次新输入检验不同的数值规则。',
-  inquiry: '本页包含适合发起全班预测与概念辨析的讨论问题，可一键生成课堂互动。',
+  rc: '可复核高速探测前级的初值、终值、时间常数与增益–带宽折中。',
+  mzi: '可检验单臂损耗下的消光比与偏置点谐波。',
+  aliasing: '可用竞争滤波谱与盲测点检验稀疏反演。',
+  concept: '可从原页引文生成概念迷思与工程折中互动，无须绑定固定仿真。',
 };
 
 export function isJevConfigured({ key = process.env.POLYPHONY_JEV_KEY } = {}) {
@@ -121,7 +118,9 @@ export async function planLectureWithJev({
     for (const [pageNumber, kind] of decisions) {
       if (kind === 'none') suggestions.delete(pageNumber);
       else if (suggestions.get(pageNumber)?.kind !== kind) {
-        suggestions.set(pageNumber, { pageNumber, kind, reason: reasons[kind] });
+        const page = sourcePages.find(p => p.number === pageNumber);
+        const quote = (page.title + ' ' + page.text).trim().slice(0, 80);
+        suggestions.set(pageNumber, { pageNumber, kind, quote, reason: reasons[kind] + ' 原页写有「' + quote + '」。' });
       }
     }
     return {

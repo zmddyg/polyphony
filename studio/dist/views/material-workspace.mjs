@@ -1,1084 +1,167 @@
-import { getLesson } from '../core/catalog.mjs';
 import { readPptx } from '../core/pptx-reader.mjs';
 import { readLegacySlides } from '../core/legacy-ppt.mjs';
-import { createMaterialNotebook, makeMaterialVersionId } from '../core/material-notebook.mjs';
-import { buildLectureScore } from '../core/lecture-score.mjs';
-import { challengeNames, rcDefaults } from '../core/challenge-lab.mjs';
-import { mountMaterialScience } from './material-science.mjs';
-import { renderMaterialNotes } from './material-notes.mjs';
-import { renderMaterialWorkshop } from './workshop.mjs';
+import { makeMaterialVersionId, createMaterialNotebook } from '../core/material-notebook.mjs';
+import { createDemoMaterial, SHOWCASE_DECKS } from '../core/demo-lesson.mjs';
+import { HARNESS_STAGES, createPageModule, validateHarnessLesson, dryRunLesson } from '../core/deck-harness.mjs';
+import { MODULE_MANIFESTS } from '../core/activities.mjs';
+import { buildLectureScore, validateLectureScore } from '../core/lecture-score.mjs';
+import { moduleHtml, bindModule } from './module-renderer.mjs';
+import { COMBAT_DECKS, blockText } from '../core/combat-decks.mjs';
+import { renderLectureFrame } from './lecture-stage.mjs';
 
-const imageData = /^data:image\/(?:png|jpeg|gif|webp|bmp);base64,/u;
-const supported = new Set(['ppt', 'pptx', 'pdf']);
-const activityTitles = {
-  mzi: '干涉仪的两个输出端',
-  blackbox: '数字黑箱',
-  history: '史料互证',
-  rc: 'RC 一阶电路',
-  inquiry: '概念辨析互动',
-};
-const planSources = { provider: '模型建议', jev: 'Jev 快速建议', local: '本地规则' };
-const supplementKinds = ['handout', 'science'];
-const noteLabels = { handout: '补充讲义', science: '理科讲解', classroom: '课堂互动', experiment: '课堂实验' };
-const experimentOptions = [
-  { kind: 'rc', title: challengeNames.rc, desc: '一阶 RC 故障排查：全班只有一次仪表测量机会，可继承本页理科模板的 R/C/V₀/V∞ 参数。' },
-  { kind: 'light', title: challengeNames.light, desc: '马赫–曾德尔干涉仪拟合与盲测挑战：用 3 个采样点拟合后选盲测角度验收。' },
-  { kind: 'blackbox', title: challengeNames.blackbox, desc: '数字黑箱规则检验：已知 0→0、2→4，全班投出一个输入数字尝试区分 x² 与 2x。' },
-];
-
-const pageLabel = (version, number) => `《${version.name}》第 ${number} 页`;
-const noteSource = (version, page) => ({
-  type: 'material-page', versionId: version.versionId, name: version.name, pageNumber: page.number,
-});
-const noteKey = (versionId, pageNumber, id) => JSON.stringify([versionId, pageNumber, id]);
-const plainLines = text => text.split(/\r\n?|\n/u).map(line => line.trim()).filter(Boolean);
-const isAdopted = note => note?.adoption && note.adoption.withdrawnAt == null;
-
-function isSafeMathML(markup) {
-  return typeof markup === 'string' &&
-    /^<math(?:\s[^<>]*)?>[\s\S]*<\/math>$/u.test(markup.trim()) &&
-    !/<(?:script|iframe|object|embed|style|link|img|svg|a)\b|on[a-z]+\s*=|javascript:/iu.test(markup);
-}
-
-function parsePastedPages(defaultTitle, rawText) {
-  const normalized = rawText.replace(/\r\n?/gu, '\n').trim();
-  const byRule = normalized.split(/\n[ \t]*-{3,}[ \t]*\n/u).map(chunk => chunk.trim()).filter(Boolean);
-  let sections = byRule;
-  if (sections.length === 1 && /^#\s+/mu.test(normalized)) {
-    const splitHeadings = normalized.split(/(?=^#\s+)/mu).map(chunk => chunk.trim()).filter(Boolean);
-    if (splitHeadings.length > 1) sections = splitHeadings;
-  }
-  if (sections.length <= 1) {
-    return [{ number: 1, title: defaultTitle, text: normalized, images: [] }];
-  }
-  return sections.map((chunk, idx) => {
-    const lines = chunk.split('\n');
-    const headingMatch = lines[0]?.match(/^#{1,3}\s+(.+)$/u);
-    const title = headingMatch ? headingMatch[1].trim().slice(0, 120)
-      : (lines[0]?.trim().slice(0, 80) || `${defaultTitle} · 第 ${idx + 1} 页`);
-    const body = headingMatch ? lines.slice(1).join('\n').trim() : chunk;
-    return { number: idx + 1, title, text: body || title, images: [] };
-  });
-}
-
-function importedMaterial(result, type, file, versionId) {
-  if (!result?.pages?.length) throw new Error('课件没有可读取的页。');
-  return {
-    ...result,
-    versionId,
-    name: file.name,
-    title: result.title || file.name.replace(/\.[^.]+$/u, ''),
-    file,
-    type,
-    pages: result.pages.map(page => ({
-      ...page,
-      preview: imageData.test(page.preview ?? '') ? page.preview : undefined,
-      images: (page.images ?? []).filter(figure => imageData.test(figure?.src ?? '')),
-    })),
-  };
-}
-
-function renderSource(version, page, e) {
-  const title = page.title || `第 ${page.number} 页`;
-  const embedded = page.preview ? [] : (page.images ?? []).filter(figure => figure.src !== page.preview);
-  const figures = embedded.length ? `<div class="mw-figures">${embedded.map(figure => `<img loading="lazy" src="${e(figure.src)}" alt="${e(figure.alt || figure.name || '原课件插图')}">`).join('')}</div>` : '';
-  const safeFormulas = page.preview ? [] : (page.formulas ?? []).filter(isSafeMathML);
-  const formulasMarkup = safeFormulas.length
-    ? `<div class="mw-formulas" aria-label="提取公式">${safeFormulas.map(math => `<div class="mw-formula">${math}</div>`).join('')}</div>`
-    : '';
-  let copy = '';
-  if (page.text && page.preview) {
-    copy = `<details class="mw-source-text"><summary>查看这页的原文</summary><p class="mw-extracted">${e(page.text)}</p></details>`;
-  } else if (!page.preview) {
-    const lines = (page.text ?? '').split(/\r\n?|\n/u);
-    if (lines[0]?.trim() === title) lines.shift();
-    const excerpt = lines.join('\n');
-    if (excerpt) copy = `<p class="mw-extracted">${e(excerpt)}</p>`;
-    else if (!page.text && !figures && !safeFormulas.length) copy = '<p class="mw-muted">这页没有可读取的文字或图片。</p>';
-  }
-  const sourceNote = figures ? '当前显示抽取的原文和可读取的插图。' : '当前按页显示抽取的原文。';
-  return `<section class="mw-paper" aria-labelledby="mw-source-title">
-    <div class="mw-source-header">
-      <p class="mw-source-ref">${e(pageLabel(version, page.number))}${page.hidden ? ' · 原课件隐藏页' : ''}</p>
-      <h2 id="mw-source-title" tabindex="-1">${e(title)}</h2>
-    </div>
-    ${page.preview ? `<img class="mw-preview" src="${e(page.preview)}" alt="${e(`原课件第 ${page.number} 页预览`)}">` : ''}
-    ${copy}
-    ${formulasMarkup}
-    ${figures}
-    ${!page.preview && (page.text || figures) && version.type !== 'text' ? `<p class="mw-source-note">${sourceNote}</p>` : ''}
-    ${page.warnings?.length ? `<details class="mw-source-text"><summary>这页的读取说明</summary><ul>${page.warnings.map(warning => `<li>${e(warning)}</li>`).join('')}</ul></details>` : ''}
-  </section>`;
-}
-
-function joinLecture(version, adopted) {
-  const supplements = new Map();
-  const interactionsByPage = new Map();
-  const experimentsByPage = new Map();
-  const sorted = [...adopted].sort((a, b) => (a.adoptedAt ?? 0) - (b.adoptedAt ?? 0));
-  for (const { pageNumber, kind, packet } of sorted) {
-    if (kind === 'classroom') interactionsByPage.set(pageNumber, packet.lesson ?? packet);
-    if (kind === 'experiment' && packet?.kind) {
-      experimentsByPage.set(pageNumber, { kind: packet.kind, ...(packet.params ? { params: packet.params } : {}) });
+const labels={'concept-diagnosis@1':'概念对撞','step-fault@1':'逐行找茬','param-explorer@1':'公式沙盒','evidence-weighing@1':'方案权衡+AI辩友'};
+let workspace={material:null,result:null,index:0,pacingMode:'stem-60s',authorMode:'import',spec:{course:'光电学院大一《软件技术基础（C语言）》',topic:'第6章指针：内存地址与内容；*p++与(*p)++闭卷读程；swap传值与传址栈帧机制；一维数组原地逆序',pageCount:12}};
+export function renderMaterialWorkspace(root,ctx) {
+  const {esc:e}=ctx, notebook=createMaterialNotebook();
+  let stopped=false,busy=false,receipt=null,status='',error=false;
+  const tell=(message,failed=false)=>{status=message;error=failed;const s=root.querySelector('[data-harness-status]');if(s){s.textContent=message;s.dataset.error=String(failed);}};
+  const pipeline=()=>`<div class="harness-head"><span class="harness-orbit">◉</span><div><h2>Agent Harness</h2><p>五阶段转化编排中枢</p></div><span class="harness-ready">${busy?'编排进行中':'准备就绪'}</span></div><ol class="harness-pipeline">${HARNESS_STAGES.map((s,i)=>{
+    const r=(receipt??workspace.result?.harnessReceipt)?.stages.find(r=>r.id===s.id),state=r?.status??'pending';
+    return `<li data-stage="${s.id}" data-state="${state}"><span>${state==='complete'?'✓':String(i+1).padStart(2,'0')}</span><div><b>${['原稿解析','全卷卡点规划','模块化契约合成','引文 / 表达式护栏与自修复','双轮沙箱预演'][i]}</b><small>${state==='complete'?'已通过 · ':state==='running'?'处理中 · ':''}${s.title}</small></div><i></i></li>`;
+  }).join('')}</ol><div class="harness-summary">${workspace.result?`<b>${workspace.result.lectureScore.pages.length} 页原稿 · ${workspace.result.lectureScore.pages.filter(p=>p.interaction).length} 个互动</b><span>${workspace.result.harnessReceipt.repairs.length} 次修复 / 回退 · 双轮预演通过</span>`:'<b>从任意课程出发</b><span>原页保留 · 模块可换 · 证据可追溯</span>'}</div><button class="v3-primary harness-run" data-run-harness ${!workspace.material||busy?'disabled':''}>⚡ ${busy?'正在运行 Agent Harness…':'运行 Agent Harness 一键生成上线教案'}</button>${workspace.result?'<button class="v3-publish" data-publish>🚀 一键发布上线教案</button><button class="v3-text" data-receipt>查看五阶段回执与修复记录</button>':''}`;
+  function paint() {
+    const {material,result}=workspace;
+    root.innerHTML=`<section class="v3-home"><header class="v3-page-heading"><div><h1>让每一份课件，都能与全班共演。</h1><p>通用课件转化编排 Agent Harness · 模块化交互教学平台</p></div><button class="v3-subtle" data-gallery>浏览交互模组 ↗</button></header><div class="v3-home-grid"><section class="v3-source-entry"><div class="v3-entry-title"><span>课件活化</span><small>PPT / PPTX / PDF</small></div><h2>保留讲授脉络，<br>找到值得全班参与的那一页。</h2><p class="v3-entry-copy">导入原稿，规划卡点，将判断、推理与证据变成可运行的双轮课堂。</p><div class="v3-upload" data-upload-zone><div class="v3-upload-mark">↥</div><div><b>上传你的课件</b><p>按页读取原文与插图，保留原始顺序</p></div><button class="v3-primary" data-upload>选择课件</button></div><div class="v3-entry-actions"><button class="v3-text" data-paste>＋ 粘贴一页讲义</button><button class="v3-text" data-new-interaction>独立新建互动</button></div><div class="v3-showcase-head"><b>从一堂真实课程开始</b><span>三类课程 · 同一套接口</span></div><div class="v3-showcases">${SHOWCASE_DECKS.map(d=>`<button data-showcase="${d.id}" class="v3-course" aria-pressed="${material?.showcaseId===d.id}"><span>${d.icon}</span><div><strong>${e(d.label)}</strong><small>${d.pages.length} 页 · ${d.id==='deck-seminar'?'大班破冰与证据质询':'推理审计与概念诊断'}</small></div><b>↗</b></button>`).join('')}</div><label class="v3-pacing">课堂节奏<select data-pacing><option value="stem-60s" ${workspace.pacingMode==='stem-60s'?'selected':''}>专业课 60s 精讲卡点</option><option value="seminar-3m" ${workspace.pacingMode==='seminar-3m'?'selected':''}>大班 3min 破冰研讨</option><option value="full-demo" ${workspace.pacingMode==='full-demo'?'selected':''}>完整示范 · 展示全部适配卡点</option></select></label></section><section class="v3-harness" data-harness-panel>${pipeline()}</section></div><p class="v3-status" data-harness-status data-error="${error}" role="status">${e(status)}</p>${material?`<section class="v3-deck"><header><div><h2>${e(material.title??material.name)}</h2><p>${material.pages.filter(p=>!p.hidden).length} 页原稿${result?' · 已编译上线教案':' · 等待 Harness 规划'}</p></div><span>未挂载互动的页面按原页放映</span></header><div class="v3-deck-layout"><nav class="v3-page-list" aria-label="原稿页码">${material.pages.filter(p=>!p.hidden).map((p,i)=>`<button data-page="${i}" aria-current="${workspace.index===i?'page':'false'}"><b>${String(p.number).padStart(2,'0')}</b><span>${e(p.title)}<small>${labels[result?.lectureScore.pages.find(r=>r.number===p.number)?.interaction?.activityId]??'原页直通'}</small></span></button>`).join('')}</nav><div data-page-preview></div></div></section>`:''}<input type="file" accept=".ppt,.pptx,.pdf" data-file hidden><dialog class="v3-dialog" data-paste-dialog><form><h2>粘贴一页讲义</h2><label>标题<input name="title" required maxlength="100"></label><label>原文<textarea name="text" rows="8" required></textarea></label><div class="v3-dialog-actions"><button type="button" class="v3-subtle" data-cancel>取消</button><button class="v3-primary">打开这一页</button></div></form></dialog><dialog class="v3-dialog v3-receipt" data-receipt-dialog><h2>Harness 五阶段回执</h2><pre>${e(JSON.stringify(result?.harnessReceipt??{},null,2))}</pre><button class="v3-subtle" data-close-receipt>关闭</button></dialog></section>`;
+    if(result) {
+      root.querySelector('.v3-home').classList.add('v3-compiled');
+      const overview=document.createElement('div');overview.className='v3-compiled-overview';
+      overview.innerHTML=`<h2>原稿逐页挂载回执</h2><p>${e(material.title??material.name)} · ${result.lectureScore.pages.length} 页</p><ol>${result.lectureScore.pages.map(p=>`<li><b>P${p.number}</b><div><strong>${e(p.title)}</strong><code>${e(p.interaction?.activityId??'原页直通')}</code></div></li>`).join('')}</ol><aside class="v3-repair-receipt"><b>✓ 引文护栏已拦截并修复</b><p>${result.harnessReceipt.repairs.length?'演示回放：不存在的 M99 引文被拒绝；按原页有效 M 编号重建契约，复验通过。':'本次输出均通过原页引文校验，无需修复。'}</p><small>修复 / 回退 ${result.harnessReceipt.repairs.length} 次 · 双轮状态机预演通过 · ${e(result.source??'local')}</small></aside>`;
+      const repairs=result.harnessReceipt.repairs;
+      overview.querySelector('.v3-repair-receipt b').textContent=repairs.length?'✓ 引文护栏已拦截并处理':'✓ 原页引文校验通过';
+      overview.querySelector('.v3-repair-receipt p').textContent=result.source==='demo-replay'&&repairs.length?'演示回放：不存在的 M99 引文被拒绝；按原页有效 M 编号重建契约，复验通过。':repairs.length?repairs.map(r=>`P${r.pageNumber} · ${r.status==='repaired'?'修复后通过':'已回退'}：${r.issue}`).join('；'):'本次输出均通过原页引文校验，无需修复。';
+      root.querySelector('.v3-source-entry').append(overview);
     }
-    if (!supplementKinds.includes(kind)) continue;
-    if (!supplements.has(pageNumber)) supplements.set(pageNumber, { slides: [] });
-    supplements.get(pageNumber).slides.push(...packet.slides);
+    decorateSources();wire(); if(material) paintPage();
   }
-  return buildLectureScore(version, supplements, { interactionsByPage, experimentsByPage });
-}
-
-function downloadJsonFile(data, filename) {
-  const href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-  const link = document.createElement('a');
-  link.href = href;
-  link.download = filename;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(href), 1000);
-}
-
-export function renderMaterialWorkspace(root, ctx) {
-  const { esc: e, icon } = ctx;
-  const notebook = createMaterialNotebook();
-  const transientNotes = new Map();
-  const unsavedDrafts = new Map();
-  let version, page, notes = [], versions = [], stored = false;
-  let pageButtons, currentPageButton;
-  let operation = '', plan, panel = '', stopped = false, draftTimer, panelCleanup, notesCleanup;
-  let draftWrites = Promise.resolve();
-  let selection = 0;
-  let versionRequest = 0;
-  const active = () => !stopped && root.isConnected;
-
-  root.innerHTML = `<div class="mw-workspace" data-mw-dropzone>
-    <header class="mw-heading">
-      <div><h1>讲义备课</h1><p data-mw-heading-info>导入已有课件，按原页备课，在共演授课。</p></div>
-      <div class="mw-actions mw-heading-actions">
-        <button class="mw-button" type="button" data-mw-workshop>${icon('sparkles')}AI 备课工坊</button>
-        <button class="mw-button" type="button" data-mw-manage data-mw-lock>${icon('layers')}管理备课本</button>
-        <select aria-label="最近打开的课件" data-mw-recent hidden></select>
-        <button class="mw-button mw-primary" type="button" data-mw-start hidden>${icon('play')}在共演开始授课</button>
-      </div>
-    </header>
-    <p class="mw-status" role="status" aria-live="polite" data-mw-status></p>
-    <p class="mw-storage-warning" role="status" hidden data-mw-storage-warning>此浏览器暂时无法保存备课内容。当前页面仍可继续备课和授课。</p>
-    <div class="mw-body" data-mw-body></div>
-    <div data-mw-workshop-host hidden></div>
-    <input type="file" accept=".ppt,.pptx,.pdf,application/pdf" data-mw-file hidden>
-    <input type="file" accept=".json,application/json" data-mw-bundle-file hidden>
-    <dialog class="mw-dialog" aria-labelledby="mw-paste-title" data-mw-paste>
-      <form class="mw-form" data-mw-paste-form>
-        <h2 id="mw-paste-title">粘贴讲义内容</h2>
-        <p class="mw-muted">支持单页文本，也支持用单独一行的 <code>---</code> 或多段 <code># 标题</code> 自动拆分为多页讲义。</p>
-        <label>讲义名称 / 首页标题<input name="title" maxlength="150" required></label>
-        <label>正文内容<textarea name="text" rows="10" required placeholder="直接粘贴讲义文字，或用 --- 分隔不同页…"></textarea></label>
-        <div class="mw-actions">
-          <button class="mw-button" type="button" data-mw-paste-close>取消</button>
-          <button class="mw-button mw-primary" type="submit">导入讲义</button>
-        </div>
-      </form>
-    </dialog>
-    <dialog class="mw-dialog mw-manage-dialog" aria-labelledby="mw-manage-title" data-mw-manage-dialog>
-      <div class="mw-manage-head">
-        <h2 id="mw-manage-title">管理本地备课本</h2>
-        <button type="button" class="mw-plain" data-mw-manage-close aria-label="关闭">${icon('close', 18)}</button>
-      </div>
-      <p class="mw-muted">可将备课本（含全部原页、批注、理科例题与互动课谱）导出为 <code>.polyphony-notebook.json</code>，跨设备或换教室电脑一键迁移。</p>
-      <div class="mw-actions mw-manage-top-actions">
-        <button type="button" class="mw-button mw-primary" data-mw-bundle-import>${icon('plus', 16)}导入备课包 (.json)</button>
-      </div>
-      <div class="mw-manage-list" data-mw-manage-list></div>
-    </dialog>
-  </div>`;
-  const find = selector => root.querySelector(selector);
-  const workspace = find('[data-mw-dropzone]');
-  const body = find('[data-mw-body]');
-  const status = find('[data-mw-status]');
-  const recent = find('[data-mw-recent]');
-  const start = find('[data-mw-start]');
-  const fileInput = find('[data-mw-file]');
-  const bundleInput = find('[data-mw-bundle-file]');
-  const pasteDialog = find('[data-mw-paste]');
-  const manageDialog = find('[data-mw-manage-dialog]');
-  const manageList = find('[data-mw-manage-list]');
-  const workshopHost = find('[data-mw-workshop-host]');
-
-  function tell(message = '', error = false) {
-    if (!active()) return;
-    status.textContent = message;
-    status.classList.toggle('mw-status-error', error);
-  }
-
-  function renderRecent() {
-    recent.hidden = !versions.length;
-    recent.replaceChildren(new Option('最近课件', ''));
-    const names = new Map();
-    for (const { name } of versions) names.set(name, (names.get(name) ?? 0) + 1);
-    for (const item of versions) {
-      const label = names.get(item.name) > 1 ? `${item.name} · ${item.versionId.slice(7, 15)}` : item.name;
-      recent.add(new Option(label, item.versionId));
+  function decorateSources() {
+    const source=root.querySelector('.v3-source-entry'),legacy=document.createElement('div');legacy.dataset.legacySource='';
+    while(source.firstChild)legacy.append(source.firstChild);
+    source.append(legacy);
+    const spec=workspace.spec;
+    source.insertAdjacentHTML('afterbegin',`<nav class="native-source-tabs" role="tablist" aria-label="双源备课中枢"><button role="tab" data-source-mode="import" aria-selected="${workspace.authorMode==='import'}">📂 导入旧教学材料活化</button><button role="tab" data-source-mode="native" aria-selected="${workspace.authorMode==='native'}">✨ AI 从零生成原生课件</button></nav><form class="native-author-form" data-author-form ${workspace.authorMode==='native'?'':'hidden'}><label>课程名称与授课对象<input name="course" value="${e(spec.course)}" required maxlength="300"></label><div class="native-author-presets">${['C Programming','Physical Optics','College English Seminar','Linear Algebra'].map((s,i)=>`<button type="button" data-author-preset="${i}">${s}</button>`).join('')}</div><label>本讲主题与核心重难点<textarea name="topic" rows="5" required maxlength="8000">${e(spec.topic)}</textarea></label><div class="native-author-pair"><label>课件页数规模<select name="pageCount">${[[8,'8 页精讲'],[10,'10 页标准课时'],[12,'12 页深度实战']].map(([n,s])=>`<option value="${n}" ${Number(spec.pageCount)===n?'selected':''}>${s}</option>`).join('')}</select></label><label>课堂节奏与偏好模组<select name="pacingMode"><option value="stem-60s" ${workspace.pacingMode==='stem-60s'?'selected':''}>专业课 60s 微卡点</option><option value="seminar-3m" ${workspace.pacingMode==='seminar-3m'?'selected':''}>大班 3min 思辨破冰</option></select></label></div><button ${busy?'disabled':''}>⚡ 调用 Agent Harness 从零生成互动课件</button><p class="native-author-note">${ctx.providerSummary?.configured?'模型已配置：生成结构化多页课件，验证引文与表达式，并执行双轮沙箱预演。':'本地结构化生成 · 配置模型 API 可解锁任意课题深度生成。匹配课程使用完整实战讲义，其他主题生成明确标注的备课框架。'}</p></form>`);
+    legacy.hidden=workspace.authorMode!=='import';
+    const list=legacy.querySelector('.v3-showcases');
+    list.innerHTML=COMBAT_DECKS.map(d=>`<button data-showcase="${d.id}" class="v3-course" aria-pressed="${workspace.material?.showcaseId===d.id}"><span>${d.icon}</span><div><strong>${e(d.label)}</strong><small>${d.pages.length} 页完整课时 · 3 页原生内嵌互动</small></div><b>↗</b></button>`).join('');
+    // Keep the three full-length classroom examples visible from either source.
+    const examples=document.createElement('section');examples.className='native-combat-examples';
+    examples.append(legacy.querySelector('.v3-showcase-head'),list);source.append(examples);
+    root.querySelectorAll('[data-source-mode]').forEach(b=>b.onclick=()=>{if(busy)return;saveAuthorForm();workspace.authorMode=b.dataset.sourceMode;paint();});
+    const presets=[['光电学院大一《软件技术基础（C语言）》','第6章指针：地址与内容；指针步长；*p++与(*p)++；swap与数组原地逆序',12],['光电学院《物理光学与光电子学》','复振幅相干叠加；不等臂损耗ER；夫琅禾费衍射；MZM偏置与二倍频',10],['大学英语 Unit 4 翻转研讨','实证阅读与证据边界；Hedging；生态谬误；匿名盲审思辨',10],['大一《线性代数》','矩阵秩与四个基本子空间；Ax=b可解性与唯一性；矩形矩阵满秩误区',10]];
+    root.querySelectorAll('[data-author-preset]').forEach(b=>b.onclick=()=>{const [course,topic,pageCount]=presets[Number(b.dataset.authorPreset)];workspace.spec={course,topic,pageCount};paint();});
+    root.querySelector('[data-author-form]').onsubmit=async event=>{event.preventDefault();await authorNative();};
+    if(workspace.result) {
+      const panel=root.querySelector('[data-harness-panel]');
+      const exportButton=document.createElement('button');exportButton.className='native-export';exportButton.dataset.exportDeck='';exportButton.textContent='导出原生课件 JSON';
+      exportButton.onclick=()=>{const file=new Blob([JSON.stringify(workspace.result.lectureScore,null,2)],{type:'application/json'}),url=URL.createObjectURL(file),a=document.createElement('a');a.href=url;a.download='共演-'+workspace.result.lectureScore.title.slice(0,60).replace(/[\\/:*?"<>|]/g,'_')+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+      panel.append(exportButton);
+      panel.querySelector('[data-publish]').textContent='▶ 在原生课件播放器开课';
     }
-    recent.disabled = Boolean(operation);
+    root.querySelector('.v3-page-heading h1').textContent='双源备课，同页共演。';
+    root.querySelector('.v3-page-heading p').textContent='导入旧课件无损活化 ∥ AI 从零生成原生互动课件';
   }
-
-  function renderManageList() {
-    if (!versions.length) {
-      manageList.innerHTML = '<p class="mw-muted">当前浏览器还没有已保存的备课本。</p>';
-      return;
-    }
-    manageList.innerHTML = `<ul class="mw-version-cards">${versions.map(item => `<li>
-      <div class="mw-version-info">
-        <strong>${e(item.name)}</strong>
-        <small>${item.pageCount ?? item.pageNumbers?.length ?? 0} 页 · ${e(item.type?.toUpperCase() || 'TEXT')}${version?.versionId === item.versionId ? ' · 当前打开' : ''}</small>
-      </div>
-      <div class="mw-actions">
-        <button type="button" class="mw-plain" data-manage-open="${e(item.versionId)}">打开</button>
-        <button type="button" class="mw-plain" data-manage-export="${e(item.versionId)}">${icon('download', 14)}导出</button>
-        <button type="button" class="mw-plain mw-danger-plain" data-manage-delete="${e(item.versionId)}">删除</button>
-      </div>
-    </li>`).join('')}</ul>`;
+  function saveAuthorForm() {
+    const form=root.querySelector('[data-author-form]');if(!form)return;
+    const data=new FormData(form);workspace.spec={course:String(data.get('course')),topic:String(data.get('topic')),pageCount:Number(data.get('pageCount'))};
+    if(workspace.authorMode==='native')workspace.pacingMode=String(data.get('pacingMode'));
   }
-
-  function busy(name = '') {
-    operation = name;
-    root.querySelectorAll('[data-mw-lock], [data-mw-start], [data-mw-recent]').forEach(control => {
-      control.disabled = Boolean(name);
-    });
-    if (!name && version && !version.pages.some(item => !item.hidden)) start.disabled = true;
-  }
-
-  async function refreshVersions() {
+  async function authorNative() {
+    if(busy)return;saveAuthorForm();busy=true;receipt=null;paint();tell('正在生成原生讲义，随后验证互动契约与双轮流程…');
     try {
-      versions = await notebook.listVersions();
-      if (active()) {
-        renderRecent();
-        if (manageDialog.open) renderManageList();
-      }
-    } catch { /* The open deck remains usable without recent files. */ }
+      const result=await ctx.authorDeck({...workspace.spec,pacingMode:workspace.pacingMode},{onStage:r=>{receipt=r;const panel=root.querySelector('[data-harness-panel]');if(panel)panel.innerHTML=pipeline();}});
+      if(stopped)return;
+      workspace.result=result;workspace.index=0;receipt=result.harnessReceipt;
+      workspace.material={name:result.lectureScore.title,title:result.lectureScore.title,type:'native',versionId:result.harnessReceipt.contentDigest,pages:result.lectureScore.pages.map(p=>({...p,text:p.blocks?.map(blockText).join('\n')??p.body.join('\n'),showcaseLesson:p.interaction}))};
+      tell(result.generationNote??'原生课件已生成，验证与双轮预演通过。');
+    } catch(err){tell(err.message,true);}finally{busy=false;if(!stopped)paint();}
   }
-
-  function storeWarning() {
-    if (active()) find('[data-mw-storage-warning]').hidden = false;
-  }
-
-  function transientFor(versionId, number) {
-    return [...transientNotes.values()].filter(item => item.versionId === versionId && (number === undefined || item.pageNumber === number));
-  }
-
-  function mergePageNotes(versionId, number, persisted) {
-    const merged = new Map(persisted.map(note => [note.id, note]));
-    for (const note of transientFor(versionId, number)) merged.set(note.id, note);
-    for (const entry of unsavedDrafts.values()) {
-      if (entry.versionId === versionId && entry.pageNumber === number) {
-        merged.set(entry.note.id, { ...merged.get(entry.note.id), ...entry.note });
-      }
-    }
-    return [...merged.values()];
-  }
-
-  async function readNotes(versionId, number) {
-    let result = [];
-    try { result = await notebook.getPageNotes(versionId, number); } catch { /* The current page can use in-memory changes. */ }
-    return mergePageNotes(versionId, number, result);
-  }
-
-  async function saveNote(target, sourcePage, note, adopt = false) {
-    const versionId = target.versionId;
-    const pageNumber = sourcePage.number;
-    const key = noteKey(versionId, pageNumber, note.id);
-    const previous = transientNotes.get(key) ?? (await readNotes(versionId, pageNumber)).find(item => item.id === note.id);
-    const updatedAt = Date.now();
-    const next = {
-      ...previous,
-      ...note,
-      versionId,
-      pageNumber,
-      updatedAt,
-      adoption: adopt ? { packet: note.packet, source: note.source, adoptedAt: updatedAt } : previous?.adoption,
+  function paintPage() {
+    const p=workspace.material.pages.filter(p=>!p.hidden)[workspace.index]; if(!p) return;
+    const lesson=workspace.result?.lectureScore.pages.find(r=>r.number===p.number)?.interaction;
+    const host=root.querySelector('[data-page-preview]');
+    host.innerHTML=`<div class="v3-preview-toolbar"><b>原稿 P${p.number}</b><label>挂载模块<select data-swap><option value="">原页直通</option>${MODULE_MANIFESTS.map(m=>`<option value="${m.id}" ${lesson?.activityId===m.id?'selected':''}>${labels[m.id]}</option>`).join('')}</select></label></div><div class="v3-source-preview">${p.preview?`<img src="${e(p.preview)}" alt="原稿第 ${p.number} 页">`:`<h3>${e(p.title)}</h3>`}<details ${p.preview?'':'open'}><summary>原页可引用文字</summary><pre>${e(p.text)}</pre></details></div>${lesson?`<section class="v3-interaction-preview"><h3>${e(lesson.title)} <small>${e(labels[lesson.activityId])}</small></h3><p>${e(lesson.prompt)}</p><div data-module-preview>${moduleHtml(lesson,{phase:'reveal',round:1,responses:[]},{standalone:true})}</div><ol class="v3-preview-options">${lesson.options.map(o=>`<li>${e(o.label)}</li>`).join('')}</ol><details><summary>编辑本页模块 JSON 契约</summary><textarea class="v3-json-editor" data-module-json rows="12" spellcheck="false">${e(JSON.stringify(lesson,null,2))}</textarea><button class="v3-subtle" data-save-module>验证并保存修改</button></details></section>`:'<p class="v3-plain-slide">这页保留原稿，不插入互动。可在上方选择适合原页内容的模块。</p>'}`;
+    if(p.blocks?.length){const content=document.createElement('div');content.className='native-workspace-preview';renderLectureFrame(content,{...p,body:[],source:{name:workspace.material.name},pageNumber:p.number},{compact:true});const preview=host.querySelector('.v3-source-preview'),transcript=preview.querySelector('details');transcript.open=false;preview.replaceChildren(content,transcript);}
+    if(lesson) bindModule(host,lesson);
+    host.querySelector('[data-swap]').onchange=event=>{
+      try {
+        const id=event.target.value, next=id?createPageModule(p,id):null;
+        updateLesson(p.number,next);
+        if(next&&next.activityId!==id) tell('原页不足以支持所选模块，已回退为有证据支撑的概念诊断。');
+        else tell('本页模块已更新。');
+      } catch(err){tell(err.message,true);}
     };
-    transientNotes.set(key, next);
+    host.querySelector('[data-save-module]')?.addEventListener('click',()=>{
+      try { const blocks=String(p.text||p.title).split(/\r?\n/).map(s=>s.trim()).filter(Boolean).map((text,i)=>({id:'M'+(i+1),text})); const checked=validateHarnessLesson(JSON.parse(host.querySelector('[data-module-json]').value),{...p,blocks}); updateLesson(p.number,checked);tell('契约、引文与表达式验证通过，已保存。'); } catch(err){tell(err.message,true);}
+    });
+  }
+  function updateLesson(number,lesson) {
+    const map=new Map(workspace.result?.lectureScore.pages.filter(p=>p.interaction).map(p=>[p.number,p.interaction])??[]);
+    if(lesson)map.set(number,lesson);else map.delete(number);
+    const adopted=new Map((workspace.result?.lectureScore.pages??[]).map(p=>[p.number,{slides:p.adopted}]));
+    const lectureScore=buildLectureScore(workspace.material,adopted,{interactionsByPage:map});
+    const harnessReceipt=structuredClone(workspace.result?.harnessReceipt??{stages:[],repairs:[],dryRuns:[]});
+    harnessReceipt.dryRuns=[...(harnessReceipt.dryRuns??[]).filter(r=>r.pageNumber!==number),...(lesson?[{pageNumber:number,...dryRunLesson(lesson)}]:[])];
+    harnessReceipt.edits=[...(harnessReceipt.edits??[]),{pageNumber:number,activityId:lesson?.activityId??null,status:'verified'}];
+    workspace.result={...workspace.result,lectureScore,harnessReceipt};
+    paint();
+  }
+  async function open(material) {
+    workspace.material=material;workspace.result=null;workspace.index=0;receipt=null;
     try {
-      await notebook.savePageNote(versionId, pageNumber, note, { adopt });
-      if (transientNotes.get(key) === next) transientNotes.delete(key);
-    } catch { storeWarning(); }
+      await notebook.saveVersion(material);
+      const notes=await notebook.listNotes(material.versionId);
+      material.pageMemories=Object.fromEntries(material.pages.map(p=>[p.number,notes.filter(n=>n.pageNumber===p.number).map(n=>({id:n.id,kind:n.kind,packet:n.packet}))]));
+    } catch { /* Continue with current deck when IndexedDB is unavailable. */ }
+    if(!stopped){paint();tell('原稿已载入。运行 Agent Harness 生成上线教案。');}
   }
-
-  async function seedSpeakerNotes(material) {
-    const withNotes = (material.pages ?? []).filter(item => typeof item.speakerNotes === 'string' && item.speakerNotes.trim());
-    if (!withNotes.length) return;
-    for (const item of withNotes) {
-      try {
-        const existing = await notebook.getPageNotes(material.versionId, item.number);
-        if (existing.some(entry => entry.kind === 'annotation')) continue;
-        await notebook.savePageNote(material.versionId, item.number, {
-          id: 'annotation',
-          kind: 'annotation',
-          packet: { text: item.speakerNotes.trim() },
-          source: { type: 'pptx-speaker-notes', pageNumber: item.number },
-        });
-      } catch { /* Ignore speaker note seed errors. */ }
-    }
-  }
-
-  function flushDrafts() {
-    clearTimeout(draftTimer);
-    draftTimer = undefined;
-    if (!unsavedDrafts.size) return draftWrites;
-    // Workshop inputs keep editing the same draft. Snapshot it before queuing the write.
-    const entries = Array.from(unsavedDrafts.values(), entry => ({ ...entry, note: structuredClone(entry.note) }));
-    unsavedDrafts.clear();
-    draftWrites = draftWrites.then(async () => {
-      for (const { target, sourcePage, note } of entries) await saveNote(target, sourcePage, note);
-    });
-    return draftWrites;
-  }
-
-  function queueDraft(target, sourcePage, note) {
-    const versionId = target.versionId;
-    const pageNumber = sourcePage.number;
-    unsavedDrafts.set(noteKey(versionId, pageNumber, note.id), { versionId, pageNumber, target, sourcePage, note });
-    if (version === target && page === sourcePage) {
-      const index = notes.findIndex(item => item.id === note.id);
-      if (index < 0) notes.push(note);
-      else notes[index] = { ...notes[index], ...note };
-    }
-    draftTimer ??= setTimeout(flushDrafts, 360);
-  }
-
-  async function readAdopted(versionId) {
-    let adopted = [];
-    try { adopted = await notebook.listAdopted(versionId); } catch { /* Include any changes kept for this page. */ }
-    const keyOf = item => noteKey(item.versionId, item.pageNumber, item.id);
-    const merged = new Map(adopted.map(item => [keyOf(item), item]));
-    for (const entry of transientFor(versionId)) {
-      if (isAdopted(entry)) merged.set(keyOf(entry), { ...entry, ...entry.adoption });
-      else merged.delete(keyOf(entry));
-    }
-    return [...merged.values()];
-  }
-
-  async function updatePageNotes() {
-    const opened = selection;
-    const updated = await readNotes(version.versionId, page.number);
-    if (!active() || opened !== selection) return;
-    notes = updated;
-    renderAdopted();
-  }
-
-  async function adoptNote(target, sourcePage, kind, packet, source = noteSource(target, sourcePage)) {
-    unsavedDrafts.delete(noteKey(target.versionId, sourcePage.number, kind));
-    await flushDrafts();
-    await saveNote(target, sourcePage, { id: kind, kind, packet, source }, true);
-    if (active() && version === target && page === sourcePage) await updatePageNotes();
-  }
-
-  async function withdrawNote(entry) {
-    const versionId = version.versionId;
-    const pageNumber = page.number;
-    const key = noteKey(versionId, pageNumber, entry.id);
-    await flushDrafts();
-    try {
-      await notebook.withdrawPageNote(versionId, pageNumber, entry.id);
-      transientNotes.delete(key);
-    } catch {
-      transientNotes.set(key, { ...entry, adoption: { ...entry.adoption, withdrawnAt: Date.now() } });
-      storeWarning();
-    }
-    if (active() && version.versionId === versionId && page.number === pageNumber) {
-      await updatePageNotes();
-    }
-  }
-
-  function renderEmpty() {
-    version = undefined;
-    page = undefined;
-    start.hidden = true;
-    find('[data-mw-workshop]').hidden = false;
-    find('[data-mw-heading-info]').textContent = '导入已有课件，按原页备课，在共演授课。';
-    body.innerHTML = `<section class="mw-empty" aria-labelledby="mw-empty-title">
-      <div class="mw-empty-icon">${icon('workshop', 30)}</div>
-      <h2 id="mw-empty-title">打开一份课件</h2>
-      <p>支持旧版 PowerPoint（.ppt）、.pptx 和 PDF；也可以直接将课件或 <code>.polyphony-notebook.json</code> 备课包拖入此处。</p>
-      <div class="mw-actions">
-        <button class="mw-button mw-primary" type="button" data-mw-upload data-mw-lock>${icon('plus')}导入课件</button>
-        <button class="mw-button" type="button" data-mw-paste-open data-mw-lock>粘贴讲义内容</button>
-        <button class="mw-button" type="button" data-mw-empty-bundle data-mw-lock>${icon('download')}导入备课包</button>
-      </div>
-      ${ctx.mode === 'server' ? '' : '<p class="mw-source-note">PDF 原页可通过启动共演本地服务导入。</p>'}
-    </section>`;
-    body.querySelector('[data-mw-upload]').onclick = () => fileInput.click();
-    body.querySelector('[data-mw-paste-open]').onclick = () => pasteDialog.showModal();
-    body.querySelector('[data-mw-empty-bundle]').onclick = () => bundleInput.click();
-  }
-
-  async function openVersion(versionId, number) {
-    if (operation) return;
-    const requested = ++versionRequest;
-    const result = await notebook.getVersion(versionId);
-    if (!active() || requested !== versionRequest) return;
-    if (!result) throw new Error('这份课件已不在最近记录里。');
-    displayVersion(result, true, number);
-  }
-
-  function displayVersion(next, saved, number) {
-    version = next;
-    stored = saved;
-    plan = undefined;
-    const count = version.pages.length;
-    find('[data-mw-heading-info]').textContent = `${version.name} · 原课件 ${count} 页`;
-    find('[data-mw-workshop]').hidden = true;
-    start.hidden = false;
-    start.disabled = Boolean(operation) || !version.pages.some(item => !item.hidden);
-    body.innerHTML = `
-      <section class="mw-plan" aria-labelledby="mw-plan-title" data-mw-plan></section>
-      <div class="mw-layout">
-        <aside class="mw-pages" aria-label="原课件页序">
-          <div class="mw-pages-heading"><h2>原课件</h2><button class="mw-plain" type="button" data-mw-replace data-mw-lock>换课件</button></div>
-          <ol class="mw-page-list" data-mw-page-list></ol>
-        </aside>
-        <div class="mw-selected" data-mw-selected></div>
-      </div>`;
-    find('[data-mw-replace]').onclick = () => fileInput.click();
-    renderPlan();
-    goToPage(number ?? version.lastPage ?? version.pages[0].number);
-  }
-
-  function renderPlan() {
-    const container = find('[data-mw-plan]');
-    if (!container) return;
-    const available = plan?.suggestions.filter(item => Object.hasOwn(activityTitles, item.kind) &&
-      version.pages.some(candidate => candidate.number === item.pageNumber && !candidate.hidden)) ?? [];
-    const fallbackCount = plan?.source === 'jev' && plan.modelPages < plan.scannedPages
-      ? ` · Jev 判读 ${plan.modelPages} 页，其余使用本地规则` : '';
-    container.innerHTML = `<div class="mw-plan-heading">
-        <div><h2 id="mw-plan-title">全课排课</h2>
-          <p>${plan ? e(`${planSources[plan.source] ?? planSources.local} · 检查了 ${plan.scannedPages} / ${plan.totalPages} 页${fallbackCount}`) : '从原课件中找适合补充讲解、概念辨析或加互动的页。'}</p></div>
-        <button class="mw-button" type="button" data-mw-plan-request data-mw-lock>${icon('sparkles')}${plan ? '重新获取建议' : '获取排课建议'}</button>
-      </div>
-      ${plan && !available.length ? '<p class="mw-plan-feedback">没有匹配到适合加互动或理科讲解的页。可以按原课件授课，也可以逐页备课。</p>' : ''}
-      ${available.length ? `<ul class="mw-suggestions">${available.map((item, index) => `<li>
-        <div><strong>${e(activityTitles[item.kind])}</strong><p>${e(item.reason)}</p></div>
-        <div class="mw-actions">
-          <button class="mw-plain" type="button" data-mw-suggestion-page="${index}" data-mw-lock>看第 ${item.pageNumber} 页</button>
-          <button class="mw-button" type="button" data-mw-suggestion="${index}" data-mw-lock>${item.kind === 'rc' ? '打开理科模板' : item.kind === 'inquiry' ? 'AI 生成本页互动' : '添加到这一页'}</button>
-        </div>
-      </li>`).join('')}</ul>` : ''}
-      ${version.warnings?.length ? `<details class="mw-import-warnings"><summary>课件读取说明</summary><ul>${version.warnings.map(warning => `<li>${e(warning)}</li>`).join('')}</ul></details>` : ''}`;
-    container.querySelector('[data-mw-plan-request]').onclick = async () => {
-      if (operation) return;
-      const target = version;
-      busy('plan');
-      tell('正在按页检查课件…');
-      try {
-        plan = await ctx.planLecture(target);
-        if (!active()) return;
-        renderPlan();
-        tell();
-        find('[data-mw-plan-request]').focus({ preventScroll: true });
-      } catch (error) {
-        tell(error?.message || '暂时无法获取排课建议，可以照常逐页备课。', true);
-      } finally {
-        busy();
-      }
-    };
-    container.querySelectorAll('[data-mw-suggestion-page]').forEach(button => {
-      button.onclick = () => goToPage(available[Number(button.dataset.mwSuggestionPage)].pageNumber, { focus: true });
-    });
-    container.querySelectorAll('[data-mw-suggestion]').forEach(button => {
-      button.onclick = async () => {
-        if (operation) return;
-        const item = available[Number(button.dataset.mwSuggestion)];
-        const target = version;
-        const sourcePage = target.pages.find(candidate => candidate.number === item.pageNumber);
-        if (item.kind === 'rc') {
-          goToPage(item.pageNumber, { tool: 'science', model: 'rc', focus: true });
-          return;
-        }
-        if (item.kind === 'inquiry') {
-          goToPage(item.pageNumber, { tool: 'classroom', focus: true });
-          return;
-        }
-        const lesson = getLesson(item.kind);
-        if (!lesson) return;
-        busy('adopt');
-        try {
-          const prior = (await readNotes(target.versionId, item.pageNumber)).find(entry => entry.kind === 'classroom');
-          await adoptNote(target, sourcePage, 'classroom', {
-            lesson,
-            workshopDraft: prior?.packet?.workshopDraft,
-          });
-          if (!active()) return;
-          goToPage(item.pageNumber, { focus: true });
-          tell(`已把「${activityTitles[item.kind]}」加入第 ${item.pageNumber} 页。`);
-        } catch (error) {
-          tell(error?.message || '添加互动失败，请重试。', true);
-        } finally {
-          busy();
-        }
-      };
-    });
-  }
-
-  function closePanels() {
-    panelCleanup?.();
-    notesCleanup?.();
-    panelCleanup = undefined;
-    notesCleanup = undefined;
-    panel = '';
-  }
-
-  function renderPageList() {
-    const list = find('[data-mw-page-list]');
-    if (!list.childElementCount) {
-      list.innerHTML = version.pages.map(item => `<li>
-        <button class="mw-page-choice" type="button" data-mw-page="${item.number}" data-mw-lock>
-          <span class="mw-page-number">${item.number}</span>
-          <span class="mw-page-name">${e(item.title || `第 ${item.number} 页`)}${item.hidden ? '<small>隐藏页</small>' : ''}</span>
-        </button>
-      </li>`).join('');
-      pageButtons = new Map(Array.from(list.querySelectorAll('[data-mw-page]'), button => [Number(button.dataset.mwPage), button]));
-      currentPageButton = undefined;
-      list.onclick = ({ target }) => {
-        const button = target.closest('[data-mw-page]');
-        if (button) goToPage(Number(button.dataset.mwPage), { focus: true });
-      };
-    }
-    const nextButton = pageButtons.get(page.number);
-    if (nextButton === currentPageButton) return;
-    currentPageButton?.removeAttribute('aria-current');
-    nextButton.setAttribute('aria-current', 'page');
-    currentPageButton = nextButton;
-  }
-
-  function goToPage(number, { tool, model, focus = false } = {}) {
-    if (!active() || !version) return;
-    const written = flushDrafts();
-    const nextPage = version.pages.find(item => item.number === number) ?? version.pages[0];
-    if (page === nextPage && !tool && !body.hidden && find('[data-mw-selected]')?.childElementCount) {
-      if (focus) focusPage();
-      return;
-    }
-    closePanels();
-    page = nextPage;
-    notes = [];
-    const target = version;
-    const current = ++selection;
-    body.hidden = false;
-    workshopHost.hidden = true;
-    workshopHost.replaceChildren();
-    find('.mw-heading').hidden = false;
-    renderPageList();
-    const selected = find('[data-mw-selected]');
-    selected.innerHTML = `
-      ${renderSource(version, page, e)}
-      ${page.hidden ? '<p class="mw-source-note">这页保留在备课记录中，放映时会跳过。</p>' : `<section class="mw-page-tools" aria-labelledby="mw-page-tools-title">
-        <div class="mw-page-tools-heading">
-          <h2 id="mw-page-tools-title">这一页的备课</h2>
-          <div class="mw-actions" role="group" aria-label="逐页备课">
-            <button class="mw-button" type="button" data-mw-tool="handout" data-mw-lock aria-expanded="false">${icon('plus')}补一页讲义</button>
-            <button class="mw-button" type="button" data-mw-tool="science" data-mw-lock aria-expanded="false">${icon('lab')}理科模板</button>
-            <button class="mw-button" type="button" data-mw-tool="experiment" data-mw-lock aria-expanded="false">${icon('target')}挂载课堂实验</button>
-            <button class="mw-button" type="button" data-mw-tool="classroom" data-mw-lock aria-expanded="false">${icon('sparkles')}备课堂互动</button>
-          </div>
-        </div>
-        <ul class="mw-adopted" aria-label="本页已安排的讲授内容" data-mw-adopted hidden></ul>
-        <div class="mw-tool-panel" data-mw-tool-panel hidden></div>
-      </section>`}
-      ${stored ? `<details class="mw-memory" data-mw-memory>
-        <summary>${icon('replay')}批注与课堂反馈</summary>
-        <div data-mw-memory-content></div>
-      </details>` : ''}
-    `;
-    selected.querySelectorAll('[data-mw-tool]').forEach(button => {
-      button.onclick = () => showTool(button.dataset.mwTool);
-    });
-    const memory = selected.querySelector('[data-mw-memory]');
-    if (memory) memory.ontoggle = () => {
-      if (!memory.isConnected || !memory.open) return;
-      notesCleanup?.();
-      notesCleanup = renderMaterialNotes(memory.querySelector('[data-mw-memory-content]'), {
-        notebook, version: target, pageNumber: nextPage.number,
-        classroom: ctx.getState?.() ?? ctx.state,
-        esc: e, goToPage,
-        openVersion: (id, destination) => openVersion(id, destination).catch(error => tell(error.message, true)),
-        onNotesChanged: (number, persisted) => {
-          notes = mergePageNotes(target.versionId, number, persisted);
-          renderAdopted();
-        },
-        onUseReason: reason => openWorkshop(reason),
-        goReplay: () => ctx.go('replay'),
-      });
-    };
-    if (focus) focusPage();
-    if (stored) void notebook.setLastPage(target.versionId, nextPage.number).catch(storeWarning);
-    void (async () => {
-      await written;
-      if (!active() || current !== selection) return;
-      await updatePageNotes();
-      if (active() && current === selection && tool) showTool(tool, model);
-    })();
-  }
-
-  function focusPage() {
-    const title = find('#mw-source-title');
-    title?.focus({ preventScroll: true });
-    title?.scrollIntoView({ block: 'nearest' });
-  }
-
-  function renderAdopted() {
-    const list = find('[data-mw-adopted]');
-    if (!list) return;
-    const adopted = notes.filter(note => isAdopted(note) && noteLabels[note.kind]);
-    list.hidden = !adopted.length;
-    list.innerHTML = adopted.map((note, index) => {
-      const packet = note.adoption.packet;
-      const title = packet.lesson?.title ?? packet.title ?? challengeNames[packet.kind] ?? noteLabels[note.kind];
-      return `<li><span>${e(noteLabels[note.kind])} · <strong>${e(title)}</strong></span>
-        <button class="mw-plain" type="button" aria-label="${e(`从授课移除「${title}」`)}" data-mw-withdraw="${index}" data-mw-lock>移除</button></li>`;
-    }).join('');
-    list.querySelectorAll('[data-mw-withdraw]').forEach(button => {
-      button.onclick = async () => {
-        button.disabled = true;
-        await withdrawNote(adopted[Number(button.dataset.mwWithdraw)]);
-      };
-    });
-  }
-
-  function showTool(kind, model) {
-    if (page.hidden) return;
-    if (kind === 'classroom') return void openWorkshop();
-    const host = find('[data-mw-tool-panel]');
-    if (!host) return;
-    panelCleanup?.();
-    panelCleanup = undefined;
-    panel = panel === kind && !model ? '' : kind;
-    host.hidden = !panel;
-    host.replaceChildren();
-    root.querySelectorAll('[data-mw-tool]').forEach(button => {
-      button.setAttribute('aria-expanded', String(button.dataset.mwTool === panel));
-    });
-    if (panel === 'handout') renderHandout(host);
-    if (panel === 'experiment') renderExperimentTool(host);
-    if (panel === 'science') {
-      const target = version;
-      const sourcePage = page;
-      panelCleanup = mountMaterialScience(host, {
-        anchor: { id: `${target.versionId}:${sourcePage.number}`, materialId: target.versionId, title: target.name, page: sourcePage.number },
-        model,
-        adoptedPacket: notes.find(note => note.kind === 'science' && isAdopted(note))?.adoption.packet,
-        onAdopt: async packet => {
-          await adoptNote(target, sourcePage, 'science', packet);
-          if (version === target && page === sourcePage) tell('已将理科讲解加入这一页。');
-        },
-      });
-    }
-  }
-
-  function renderExperimentTool(host) {
-    const target = version;
-    const sourcePage = page;
-    const existing = notes.find(note => note.kind === 'experiment' && isAdopted(note))?.adoption?.packet;
-    const adoptedRc = notes.find(note => note.kind === 'science' && isAdopted(note) && note.adoption.packet?.model === 'rc')?.adoption?.packet;
-    const inheritedParams = adoptedRc?.parameters ?? existing?.params ?? rcDefaults;
-    const selectedKind = existing?.kind ?? 'rc';
-    host.innerHTML = `<form class="mw-form mw-exp-form" data-mw-exp-form>
-      <p class="mw-muted">为原稿第 ${sourcePage.number} 页显式挂载一项课堂现场实验，授课时可直接点击底部实验按钮启动。</p>
-      <div class="mw-exp-options">${experimentOptions.map(opt => `<label class="mw-exp-card">
-        <input type="radio" name="kind" value="${e(opt.kind)}"${opt.kind === selectedKind ? ' checked' : ''}>
-        <div><strong>${e(opt.title)}</strong><p>${e(opt.desc)}</p></div>
-      </label>`).join('')}</div>
-      <div class="mw-exp-rc-note" data-exp-rc-note${selectedKind === 'rc' ? '' : ' hidden'}>
-        <strong>RC 故障台参数：</strong>
-        R = ${e(inheritedParams.resistanceKohm)} kΩ，C = ${e(inheritedParams.capacitanceNf)} nF，V₀ = ${e(inheritedParams.initialV)} V，V∞ = ${e(inheritedParams.finalV)} V
-        ${adoptedRc ? '（已自动同步本页采用的理科模板参数）' : '（如需自定义参数，可先在「理科模板」调整并采用）'}
-      </div>
-      <div class="mw-actions"><button class="mw-button mw-primary" type="submit" data-mw-lock>${icon('check')}挂载到此页</button></div>
-    </form>`;
-    const form = host.querySelector('[data-mw-exp-form]');
-    const rcNote = form.querySelector('[data-exp-rc-note]');
-    form.onchange = () => {
-      rcNote.hidden = form.elements.kind.value !== 'rc';
-    };
-    form.onsubmit = async event => {
-      event.preventDefault();
-      const kind = form.elements.kind.value;
-      const meta = experimentOptions.find(item => item.kind === kind);
-      if (!meta) return;
-      const packet = {
-        kind,
-        title: meta.title,
-        ...(kind === 'rc' ? { params: inheritedParams } : {}),
-      };
-      event.submitter.disabled = true;
-      try {
-        await adoptNote(target, sourcePage, 'experiment', packet);
-        if (version === target && page === sourcePage) tell(`已将「${meta.title}」挂载到第 ${sourcePage.number} 页。`);
-      } finally {
-        event.submitter.disabled = false;
-      }
-    };
-  }
-
-  function renderHandout(host) {
-    const target = version;
-    const sourcePage = page;
-    const existing = notes.find(note => note.kind === 'handout')?.packet.slides[0];
-    host.innerHTML = `<form class="mw-form" data-mw-handout>
-      <label>补页标题<input name="title" maxlength="150" required value="${e(existing?.title ?? `${sourcePage.title || `第 ${sourcePage.number} 页`} · 补充讲义`)}"></label>
-      <label>讲义内容<textarea name="text" rows="5" required>${e(existing?.body.join('\n'))}</textarea></label>
-      <div class="mw-actions"><button class="mw-button mw-primary" type="submit" data-mw-lock>${icon('check')}采用补页</button></div>
-    </form>`;
-    const form = host.querySelector('form');
-    const packet = () => {
-      const title = form.elements.title.value.trim();
-      return { title, slides: [{ title, body: plainLines(form.elements.text.value), source: pageLabel(target, sourcePage.number) }] };
-    };
-    form.oninput = () => queueDraft(target, sourcePage, {
-      id: 'handout', kind: 'handout', packet: packet(), source: noteSource(target, sourcePage),
-    });
-    form.onsubmit = async event => {
-      event.preventDefault();
-      const current = packet();
-      if (!current.title || !current.slides[0].body.length) return tell('请填写补页的标题和内容。', true);
-      event.submitter.disabled = true;
-      try {
-        await adoptNote(target, sourcePage, 'handout', current);
-        if (version === target && page === sourcePage) tell('已将补充讲义加入这一页。');
-      } finally {
-        event.submitter.disabled = false;
-      }
-    };
-  }
-
-  async function openWorkshop(reason) {
-    if (!page || page.hidden || body.hidden) return;
-    const target = version;
-    const sourcePage = page;
-    await flushDrafts();
-    const pageNotes = await readNotes(target.versionId, sourcePage.number);
-    if (!active() || version !== target || page !== sourcePage || body.hidden) return;
-    const saved = pageNotes.find(note => note.kind === 'classroom');
-    const old = saved?.packet?.workshopDraft;
-    const starter = saved?.packet?.lesson;
-    const draft = old ? structuredClone(old) : {
-      topic: (sourcePage.title || target.title).slice(0, 100),
-      goal: '根据本页材料做出判断，并说明判断依据。',
-      material: (sourcePage.text ?? '').trim().slice(0, 2200),
-      ...(starter ? { score: structuredClone(starter), source: 'imported' } : {}),
-      ...(starter && getLesson(starter.id) ? { reference: starter.id } : {}),
-    };
-    let source = saved?.source ?? noteSource(target, sourcePage);
-    if (reason?.reason) {
-      const excerpt = `课堂反馈（原话）\n${reason.reason}`;
-      if (!draft.material.includes(excerpt)) {
-        draft.material = [draft.material.slice(0, Math.max(0, 2198 - excerpt.length)).trim(), excerpt].filter(Boolean).join('\n\n').slice(0, 2200);
-      }
-      source = { ...noteSource(target, sourcePage), response: reason.source };
-      queueDraft(target, sourcePage, { id: 'classroom', kind: 'classroom', packet: { lesson: starter, workshopDraft: draft }, source });
-    }
-    const closeWorkshop = () => {
-      if (!active()) return;
-      void flushDrafts().then(updatePageNotes);
-      body.hidden = false;
-      find('.mw-heading').hidden = false;
-      workshopHost.hidden = true;
-      workshopHost.replaceChildren();
-      find('[data-mw-tool="classroom"]')?.focus({ preventScroll: true });
-    };
-    body.hidden = true;
-    find('.mw-heading').hidden = true;
-    workshopHost.hidden = false;
-    renderMaterialWorkshop(workshopHost, ctx, {
-      pageLabel: pageLabel(target, sourcePage.number),
-      draft,
-      onBack: closeWorkshop,
-      onChange: workshopDraft => queueDraft(target, sourcePage, {
-        id: 'classroom', kind: 'classroom', packet: { lesson: starter, workshopDraft }, source,
-      }),
-      onAdopt: async (lesson, workshopDraft) => {
-        await adoptNote(target, sourcePage, 'classroom', { lesson, workshopDraft }, source);
-        if (active() && version === target && page === sourcePage) {
-          closeWorkshop();
-          tell('已将互动课谱加入这一页。');
-        }
-      },
-    });
-    workshopHost.querySelector('h1').tabIndex = -1;
-    workshopHost.querySelector('h1').focus({ preventScroll: true });
-  }
-
   async function importFile(file) {
-    const type = file.name.split('.').at(-1).toLowerCase();
-    if (!supported.has(type)) throw new Error('请选择 .ppt、.pptx 或 .pdf 文件。');
-    const bytes = await file.arrayBuffer();
-    const versionId = await makeMaterialVersionId({ name: file.name, bytes });
-    let previous;
-    try { previous = await notebook.getVersion(versionId); } catch { /* Reading the new deck still works. */ }
-    if (previous) {
-      // Upgrade offline-cached slides with server-rendered original previews when now online.
-      if (ctx.materialRendering && previous.type !== 'text' && previous.pages.some(item => !item.hidden && !item.preview)) {
-        try {
-          const rendered = await ctx.importMaterial(file);
-          const matchingPages = rendered?.pages?.length === previous.pages.length &&
-            rendered.pages.every((item, index) => item.number === previous.pages[index].number);
-          if (matchingPages) {
-            const upgraded = await notebook.updateDocumentPages(versionId, rendered.pages, rendered.warnings ?? previous.warnings);
-            return { material: upgraded, saved: true, upgraded: true };
-          }
-        } catch { /* Keep the cached notebook intact if rendering fails. */ }
-      }
-      return { material: previous, saved: true };
-    }
-    let result;
-    if (type === 'pptx') {
-      let parsedInBrowser = true;
-      try { result = await readPptx(file); }
-      catch (error) {
-        if (!ctx.materialRendering) throw error;
-        parsedInBrowser = false;
-        result = await ctx.importMaterial(file);
-      }
-      if (parsedInBrowser && ctx.materialRendering && result.pages.some(item => !item.hidden && !item.preview)) {
-        try {
-          const rendered = await ctx.importMaterial(file);
-          const matchingPages = rendered.pages.length === result.pages.length &&
-            rendered.pages.every((item, index) => item.number === result.pages[index].number);
-          if (matchingPages) {
-            result.pages = result.pages.map((item, index) => ({
-              ...item, preview: rendered.pages[index].preview || item.preview,
-            }));
-          } else {
-            result.warnings = [...(result.warnings ?? []), '原页图的页数或顺序与课件记录不一致，仍保留原课件页序。'];
-          }
-        } catch {
-          result.warnings = [...(result.warnings ?? []), '未能生成完整的原页图。按页显示已有的预览、原文和插图。'];
-        }
-      }
-    }
-    else if (ctx.mode === 'server') result = await ctx.importMaterial(file);
-    else if (type === 'ppt') {
-      result = readLegacySlides(new Uint8Array(bytes), { pageLimit: 100, textLimit: 12000 });
-      result.warnings = ['旧版 PowerPoint 在此处按页显示抽取的原文。'];
-      if (result.truncated) result.warnings.push('文件较大。部分原文或原页超出读取范围。');
-    } else throw new Error('请启动共演本地服务，再导入 PDF。也可以粘贴其中一页的原文。');
-    const saved = await storeVersion(importedMaterial(result, type, file, versionId));
-    if (saved.saved) await seedSpeakerNotes(saved.material);
-    return saved;
-  }
-
-  async function importNotebookFile(file) {
-    if (file.size > 64 * 1024 * 1024) throw new Error('备课包文件超过 64 MB 大小限制。');
-    let parsed;
-    try { parsed = JSON.parse(await file.text()); }
-    catch { throw new Error('无法解析 JSON 备课包文件。'); }
-    const imported = await notebook.importNotebook(parsed);
-    const loaded = await notebook.getVersion(imported.versionId);
-    if (!loaded) throw new Error('备课包导入后无法打开。');
-    return {
-      material: loaded,
-      saved: true,
-      message: `已导入备课包「${imported.name}」（${imported.pageCount} 页，${imported.noteCount} 条备课记录）。`,
-    };
-  }
-
-  async function storeVersion(material) {
+    if(busy)return;busy=true;tell('正在解析原稿…');
     try {
-      return { material: await notebook.saveVersion(material), saved: true };
-    } catch {
-      storeWarning();
-      return { material, saved: false };
-    }
-  }
-
-  async function runImport(read) {
-    if (operation) return false;
-    versionRequest += 1;
-    busy('import');
-    tell('正在读取课件…');
-    try {
-      const { material, saved, upgraded, message } = await read();
-      if (!active()) return false;
-      displayVersion(material, saved);
-      tell(message ?? (upgraded ? '已自动补齐高清原页预览，原有批注与备课记录完整保留。' : ''));
-      void refreshVersions();
-      return true;
-    } catch (error) {
-      tell(error?.message || '无法读取课件，请重新选择文件。', true);
-      return false;
-    } finally {
-      busy();
-    }
-  }
-
-  function handleIncomingFile(file) {
-    if (!file) return;
-    const ext = file.name.split('.').at(-1).toLowerCase();
-    if (ext === 'json') {
-      if (manageDialog.open) manageDialog.close();
-      void runImport(() => importNotebookFile(file));
-    } else {
-      void runImport(() => importFile(file));
-    }
-  }
-
-  fileInput.onchange = () => {
-    const [file] = fileInput.files;
-    fileInput.value = '';
-    handleIncomingFile(file);
-  };
-  bundleInput.onchange = () => {
-    const [file] = bundleInput.files;
-    bundleInput.value = '';
-    if (file) {
-      if (manageDialog.open) manageDialog.close();
-      void runImport(() => importNotebookFile(file));
-    }
-  };
-
-  let dragDepth = 0;
-  const onDragEnter = event => {
-    if (!event.dataTransfer?.types?.includes('Files')) return;
-    event.preventDefault();
-    dragDepth++;
-    workspace.classList.add('is-dragover');
-  };
-  const onDragOver = event => {
-    if (!event.dataTransfer?.types?.includes('Files')) return;
-    event.preventDefault();
-  };
-  const onDragLeave = () => {
-    dragDepth = Math.max(0, dragDepth - 1);
-    if (dragDepth === 0) workspace.classList.remove('is-dragover');
-  };
-  const onDrop = event => {
-    event.preventDefault();
-    dragDepth = 0;
-    workspace.classList.remove('is-dragover');
-    const file = event.dataTransfer?.files?.[0];
-    if (file && !operation) handleIncomingFile(file);
-  };
-  workspace.addEventListener('dragenter', onDragEnter);
-  workspace.addEventListener('dragover', onDragOver);
-  workspace.addEventListener('dragleave', onDragLeave);
-  workspace.addEventListener('drop', onDrop);
-
-  find('[data-mw-manage]').onclick = async () => {
-    await refreshVersions();
-    renderManageList();
-    manageDialog.showModal();
-  };
-  find('[data-mw-manage-close]').onclick = () => manageDialog.close();
-  find('[data-mw-bundle-import]').onclick = () => bundleInput.click();
-  manageList.onclick = async event => {
-    const openBtn = event.target.closest('[data-manage-open]');
-    if (openBtn) {
-      manageDialog.close();
-      try { await openVersion(openBtn.dataset.manageOpen); tell(); }
-      catch (error) { tell(error?.message || '无法打开课件。', true); }
-      return;
-    }
-    const exportBtn = event.target.closest('[data-manage-export]');
-    if (exportBtn) {
-      const id = exportBtn.dataset.manageExport;
-      exportBtn.disabled = true;
-      try {
-        const bundle = await notebook.exportNotebook(id);
-        const safeName = (bundle.versionMeta?.name || 'notebook').replace(/[\\/:*?"<>|]/g, '_');
-        downloadJsonFile(bundle, `${safeName}.polyphony-notebook.json`);
-        ctx.toast('已导出备课包');
-      } catch (error) {
-        tell(error?.message || '导出备课包失败。', true);
-      } finally {
-        exportBtn.disabled = false;
+      const ext=file.name.split('.').at(-1).toLowerCase();
+      if(ext==='json') {
+        if(file.size>64*1024*1024)throw Error('课件超过64MB。');
+        const lectureScore=validateLectureScore(JSON.parse(await file.text()));
+        const versionId=await makeMaterialVersionId({bytes:JSON.stringify(lectureScore)});
+        workspace.material={name:lectureScore.title,title:lectureScore.title,type:lectureScore.source.kind,versionId,pages:lectureScore.pages.map(p=>({...p,text:p.blocks?.map(blockText).join('\n')??p.body.join('\n'),showcaseLesson:p.interaction}))};
+        workspace.index=0;workspace.result={lectureScore,source:'json-import',harnessReceipt:{version:'polyphony.harness@1',source:'json-import',stages:HARNESS_STAGES.map(s=>({...s,status:'complete'})),repairs:[],dryRuns:lectureScore.pages.filter(p=>p.interaction).map(p=>({pageNumber:p.number,...dryRunLesson(p.interaction)}))}};
+        receipt=workspace.result.harnessReceipt;tell('原生课件JSON已验证并完成双轮预演，可以直接开课。');return;
       }
-      return;
-    }
-    const deleteBtn = event.target.closest('[data-manage-delete]');
-    if (deleteBtn) {
-      const id = deleteBtn.dataset.manageDelete;
-      const meta = versions.find(item => item.versionId === id);
-      manageDialog.close();
-      const confirmed = await ctx.confirmDialog({
-        title: '删除本地备课本？',
-        message: `将永久删除「${meta?.name ?? id}」及其全部批注、补充讲义和互动课谱。建议删除前先导出备课包。`,
-        confirmLabel: '确认删除',
-        cancelLabel: '取消',
-        danger: true,
-      });
-      if (!confirmed) return;
-      try {
-        await notebook.deleteVersion(id);
-        if (version?.versionId === id) renderEmpty();
-        await refreshVersions();
-        ctx.toast('已删除本地备课本');
-      } catch (error) {
-        tell(error?.message || '删除备课本失败。', true);
-      }
-    }
-  };
-
-  find('[data-mw-paste-close]').onclick = () => pasteDialog.close();
-  find('[data-mw-paste-form]').onsubmit = async event => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const title = form.elements.title.value.trim();
-    const text = form.elements.text.value.trim();
-    if (!title || !text) return;
-    pasteDialog.close();
-    const opened = await runImport(async () => {
-      const pages = parsePastedPages(title, text);
-      const bytes = new TextEncoder().encode(`${title}\n${text}`);
-      const versionId = await makeMaterialVersionId({ name: title, bytes });
-      return storeVersion({ name: title, title, versionId, type: 'text', pages });
-    });
-    if (opened) form.reset();
-  };
-  find('[data-mw-workshop]').onclick = () => ctx.go('workshop');
-  recent.onchange = async () => {
-    const { value } = recent;
-    recent.value = '';
-    if (!value || operation) return;
-    try { await openVersion(value); tell(); }
-    catch (error) { tell(error?.message || '无法打开最近课件。', true); }
-  };
-  start.onclick = async () => {
-    if (operation || !version) return;
-    busy('start');
-    const target = version;
-    tell('正在准备共演授课…');
+      if(!['ppt','pptx','pdf'].includes(ext))throw Error('请选择 .ppt / .pptx / .pdf 文件。');
+      const bytes=new Uint8Array(await file.arrayBuffer());
+      const versionId=await makeMaterialVersionId({bytes});
+      let data;
+      if(ctx.mode==='server'&&(ext!=='pptx'||ctx.materialRendering))try{data=await ctx.importMaterial(file);}catch(err){if(ext==='pdf')throw err;}
+      if(!data&&ext==='pptx')data=await readPptx(file);
+      else if(!data&&ext==='ppt')data=await readLegacySlides(bytes);
+      else if(!data)throw Error('PDF 按页渲染请使用本机课堂服务；离线可粘贴原页文字。');
+      await open({...data,type:ext,versionId,name:file.name,title:data.title||file.name});
+      if(data.warnings?.length)tell('原稿已载入。'+data.warnings.join(' '));
+    } catch(err){tell(err.message,true);}finally{busy=false;if(!stopped)paint();}
+  }
+  async function run() {
+    if(busy||!workspace.material)return;
+    busy=true;receipt={stages:HARNESS_STAGES.map(s=>({...s,status:s.id==='ingest'?'running':'pending'}))};paint();tell('Harness 正在解析、规划与验证课件。');
     try {
-      await flushDrafts();
-      const lecture = joinLecture(target, await readAdopted(target.versionId));
-      if (active()) await ctx.startLecture(lecture);
-    } catch (error) {
-      tell(error?.message || '未能开始授课，请重试。', true);
-    } finally {
-      busy();
-    }
-  };
-
-  renderEmpty();
-  const onVisibilityChange = () => {
-    if (document.visibilityState === 'hidden') void flushDrafts();
-  };
-  document.addEventListener('visibilitychange', onVisibilityChange);
-  window.addEventListener('pagehide', flushDrafts);
-  void (async () => {
-    await refreshVersions();
-    if (active() && !version && !operation && versions.length) {
-      try { await openVersion(versions[0].versionId); }
-      catch { /* An unavailable recent deck does not prevent import. */ }
-    }
-  })();
-  return () => {
-    stopped = true;
-    closePanels();
-    workspace.removeEventListener('dragenter', onDragEnter);
-    workspace.removeEventListener('dragover', onDragOver);
-    workspace.removeEventListener('dragleave', onDragLeave);
-    workspace.removeEventListener('drop', onDrop);
-    document.removeEventListener('visibilitychange', onVisibilityChange);
-    window.removeEventListener('pagehide', flushDrafts);
-    void flushDrafts();
-  };
+      const result=await ctx.runHarness(workspace.material,{pacingMode:workspace.pacingMode,mode:ctx.providerSummary?.configured?'auto':'demo-replay',onStage:r=>{receipt=r;const panel=root.querySelector('[data-harness-panel]');if(panel)panel.innerHTML=pipeline();}});
+      if(stopped)return;workspace.result=result;receipt=result.harnessReceipt;tell('上线教案编译完成。请逐页预览，确认后发布。');
+    } catch(err){tell(err.message,true);}finally{busy=false;if(!stopped)paint();}
+  }
+  function wire() {
+    root.querySelector('[data-gallery]').onclick=()=>ctx.go('lab');
+    root.querySelector('[data-new-interaction]').onclick=()=>ctx.go('workshop');
+    root.querySelector('[data-upload]').onclick=()=>root.querySelector('[data-file]').click();
+    root.querySelector('[data-file]').onchange=event=>{const f=event.target.files[0];if(f)void importFile(f);};
+    root.querySelector('[data-file]').accept='.ppt,.pptx,.pdf,.json';
+    const zone=root.querySelector('[data-upload-zone]');zone.ondragover=event=>event.preventDefault();zone.ondrop=event=>{event.preventDefault();const f=event.dataTransfer.files[0];if(f)void importFile(f);};
+    root.querySelector('[data-pacing]').onchange=event=>{workspace.pacingMode=event.target.value;};
+    root.querySelectorAll('[data-showcase]').forEach(b=>b.onclick=()=>{if(busy)return;workspace.pacingMode=b.dataset.showcase==='deck-seminar'?'seminar-3m':'full-demo';void open(createDemoMaterial(b.dataset.showcase));});
+    root.querySelector('[data-run-harness]').onclick=workspace.authorMode==='native'?()=>root.querySelector('[data-author-form]').requestSubmit():run;
+    if(workspace.authorMode==='native'){root.querySelector('[data-run-harness]').disabled=busy;root.querySelector('[data-run-harness]').textContent=busy?'正在生成原生课件…':'⚡ 从课程主题生成原生课件';}
+    root.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{workspace.index=Number(b.dataset.page);paint();});
+    root.querySelector('[data-publish]')?.addEventListener('click',async event=>{event.currentTarget.disabled=true;try{await ctx.startLecture(workspace.result.lectureScore);}catch(err){tell(err.message,true);event.target.disabled=false;}});
+    const dialog=root.querySelector('[data-paste-dialog]');root.querySelector('[data-paste]').onclick=()=>dialog.showModal();dialog.querySelector('[data-cancel]').onclick=()=>dialog.close();
+    dialog.querySelector('form').onsubmit=async event=>{event.preventDefault();const f=event.target,title=f.elements.title.value.trim(),text=f.elements.text.value.trim();const versionId=await makeMaterialVersionId({bytes:new TextEncoder().encode(title+'\n'+text)});dialog.close();await open({name:title,title,type:'text',versionId,pages:[{number:1,title,text,images:[]}]});};
+    const rd=root.querySelector('[data-receipt-dialog]');root.querySelector('[data-receipt]')?.addEventListener('click',()=>rd.showModal());root.querySelector('[data-close-receipt]').onclick=()=>rd.close();
+  }
+  paint();
+  return ()=>{stopped=true;};
 }

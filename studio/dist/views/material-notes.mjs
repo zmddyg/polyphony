@@ -89,7 +89,7 @@ function classroomPanel({ binding, reference, quotes, selected, notes, goReplay,
     ${binding ? `<p class="pmn-meta">课堂 ${esc(binding.room)} · ${esc(binding.lessonTitle)}</p>` : ''}
     ${reference && !sameClass ? `<button class="pmn-button" type="button" data-pmn-bind>
       ${binding ? '改为关联课堂' : '关联此页与课堂'} ${esc(reference.room)}</button>` : ''}
-    ${sameClass && goReplay ? '<button type="button" class="pmn-link" data-pmn-replay>查看课堂回顾</button>' : ''}
+    ${sameClass && goReplay ? '<button type="button" class="pmn-link" data-pmn-replay>查看学情复盘</button>' : ''}
     ${quotes.length ? `<label>选择真实作答理由<select data-pmn-quote>
       ${quotes.map(({ reason, source }) => `<option value="${esc(source.responseId)}"${source.responseId === selected ? ' selected' : ''}>
         第 ${source.round} 轮 · ${esc(reason.slice(0, 32))}${reason.length > 32 ? '…' : ''}
@@ -144,7 +144,7 @@ export function renderMaterialNotes(root, {
 
   function draw() {
     const { binding, notes, quotes, allNotes, versions } = data;
-    const annotation = notes.find(note => note.kind === 'annotation');
+    const annotation = notes.find(note => note.kind === 'annotation' && note.source?.type !== 'classroom-review');
     const remembered = annotationDrafts.get(draftKey) ?? annotationText(annotation);
     if (!sectionMarkup.size) {
       root.innerHTML = `<div class="pmn">
@@ -170,7 +170,7 @@ export function renderMaterialNotes(root, {
     if (meta.textContent !== stamp) meta.textContent = stamp;
     const sections = {
       classroom: classroomPanel({ binding, reference, quotes, selected, notes, goReplay, onUseReason, esc }),
-      history: savedDrafts(notes, esc, pageNumber) + pageHistory(allNotes, version, esc) +
+      history: notes.filter(note => note.source?.type === 'classroom-review').map(note => `<section class="pmn-card pmn-review-memory"><h3>本页课堂回流 · 典型物理误区</h3><p>${esc(annotationText(note))}</p><small>原稿第 ${pageNumber} 页 · ${esc(formatDate(note.updatedAt))} · 已锚定</small></section>`).join('') + savedDrafts(notes, esc, pageNumber) + pageHistory(allNotes, version, esc) +
         versionHistory(versions, version, openVersion, esc),
     };
     for (const [name, html] of Object.entries(sections)) {

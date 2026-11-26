@@ -65,7 +65,8 @@ test('classroom analysis uses the configured gateway and keeps invalid citations
   assert.equal(status.aiOutputMode, 'json_schema');
   assert.equal(status.assistedComposition, true);
   assert.equal(status.assistedAnalysis, true);
-  assert.doesNotMatch(JSON.stringify(status), /fixture-key|contract-test/);
+  assert.equal(status.providerSummary.model,'contract-test');
+  assert.doesNotMatch(JSON.stringify(status), /fixture-key/);
 
   const opened = await post('/api/rooms', { demo: true, lessonId: 'mzi' });
   assert.equal(opened.status, 201);

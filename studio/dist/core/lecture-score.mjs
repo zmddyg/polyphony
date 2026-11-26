@@ -1,11 +1,9 @@
 import { exportScore } from './score-package.mjs';
-import { challengeNames, normalizeRcParams } from './challenge-lab.mjs';
-import { isSafeMathML } from './mathml.mjs';
+import { isDemoDiagram } from './demo-lesson.mjs';
 
 const format = 'polyphony.lecture';
 const version = 1;
 const imagePrefix = /^data:image\/(?:png|jpeg|gif|webp|bmp);base64,/u;
-const roomAssetPattern = /^\.\/api\/rooms\/[A-Z0-9]{6}\/assets\/[0-9a-f]{64}\.(?:png|jpe?g|gif|webp|bmp)$/u;
 export const MAX_LECTURE_BYTES = 64 * 1024 * 1024;
 
 function requiredText(value, field) {
@@ -29,9 +27,36 @@ function paragraphs(value, field) {
   }).filter(Boolean);
 }
 
-export const isEmbeddedLectureImage = src => typeof src === 'string' && imagePrefix.test(src);
-export const isRoomAssetUrl = src => typeof src === 'string' && roomAssetPattern.test(src);
-export const isLectureImage = src => isEmbeddedLectureImage(src) || isRoomAssetUrl(src);
+// Native slides are data, never authored HTML. Drop no content silently.
+export function validateSlideBlocks(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 16) throw Error('课件 blocks 须为最多 16 个结构化区块。');
+  const string = (v, name) => { if (typeof v !== 'string' || v.length > 16000) throw Error(name+' 须为有限长度文本。'); return v; };
+  const strings = (v, name) => { if (!Array.isArray(v) || v.length > 80) throw Error(name+' 须为文本数组。'); return v.map(x=>string(x,name)); };
+  const code = v => { if (!v || typeof v !== 'object') throw Error('代码栏无效。'); return {title:string(v.title??'','代码标题'),language:string(v.language??'c','语言'),code:string(v.code,'代码')}; };
+  return value.map(b=>{
+    if (!b || typeof b !== 'object') throw Error('课件区块无效。');
+    const common = {type:b.type, ...(b.title !== undefined && {title:string(b.title,'区块标题')})};
+    if (b.type==='code') return {...common,...code(b)};
+    if (b.type==='code-pair') return {...common,left:code(b.left),right:code(b.right)};
+    if (b.type==='table') {
+      const headers=strings(b.headers,'表头');
+      if (!headers.length || headers.length>8 || !Array.isArray(b.rows) || b.rows.length>40) throw Error('表格规模无效。');
+      const rows=b.rows.map(r=>{const cells=strings(r,'单元格');if(cells.length!==headers.length)throw Error('表格列数不一致。');return cells;});
+      return {...common,headers,rows};
+    }
+    if (b.type==='callout') return {...common,text:string(b.text,'提示'),tone:['note','warning','success'].includes(b.tone)?b.tone:'note'};
+    if (['steps','bullets','formula'].includes(b.type)) return {...common,items:strings(b.items,'条目')};
+    if (b.type==='stat-grid') {
+      if (!Array.isArray(b.items) || b.items.length>8) throw Error('统计区块无效。');
+      return {...common,items:b.items.map(i=>({value:string(i?.value,'数值'),label:string(i?.label,'标签')}))};
+    }
+    if (b.type==='chart') {const plot=chart(b,'区块图表');if(!plot.points&&!plot.series)throw Error('图表区块须包含有限数值坐标。');return {...common,...plot};}
+    throw Error('未知课件区块：'+b.type);
+  });
+}
+
+export const isEmbeddedLectureImage = src => typeof src === 'string' && (imagePrefix.test(src) || isDemoDiagram(src));
 
 function image(src, field) {
   if (!isEmbeddedLectureImage(src)) throw new Error(`${field}须使用已嵌入的原稿图片。`);
@@ -96,32 +121,6 @@ function chart(slide, field) {
   return result;
 }
 
-function safeFormulas(value, field) {
-  if (value === undefined) return {};
-  if (!Array.isArray(value)) throw new Error(`${field}的公式列表格式无效。`);
-  const formulas = value.slice(0, 16).map(item => {
-    if (typeof item !== 'string') throw new Error(`${field}的公式格式无效。`);
-    const trimmed = item.trim();
-    if (!isSafeMathML(trimmed)) {
-      throw new Error(`${field}包含不受支持的公式标记。`);
-    }
-    return trimmed;
-  }).filter(Boolean);
-  return formulas.length ? { formulas } : {};
-}
-
-function pageExperiment(value, field) {
-  if (value === undefined || value === null) return {};
-  if (typeof value !== 'object' || !Object.hasOwn(challengeNames, value.kind)) {
-    throw new Error(`${field}的实验类型不受支持。`);
-  }
-  const experiment = { kind: value.kind };
-  if (value.kind === 'rc' && value.params && typeof value.params === 'object') {
-    experiment.params = normalizeRcParams(value.params);
-  }
-  return { experiment };
-}
-
 function classMaterial(page, source) {
   const { number } = page;
   const field = `原稿第 ${number} 页`;
@@ -131,9 +130,9 @@ function classMaterial(page, source) {
     return {
       title: requiredText(slide?.title, `${caption}标题`),
       body: paragraphs(slide.body, caption),
-      ...safeFormulas(slide.formulas, caption),
       ...visuals(slide, caption),
       ...chart(slide, caption),
+      ...(slide.blocks && {blocks:validateSlideBlocks(slide.blocks)}),
     };
   });
   const result = {
@@ -142,10 +141,10 @@ function classMaterial(page, source) {
     title: requiredText(page.title, `${field}标题`),
     body: paragraphs(page.body, field),
     source: { name: source.name, pageNumber: number },
-    ...safeFormulas(page.formulas, field),
     ...visuals(page, field),
-    ...pageExperiment(page.experiment, field),
     adopted,
+    ...(page.blocks && {blocks:validateSlideBlocks(page.blocks)}),
+    ...(page.speakerNotes && {speakerNotes:optionalText(page.speakerNotes,'讲者备注')}),
   };
   if (page.interaction !== undefined) result.interaction = JSON.parse(exportScore(page.interaction)).lesson;
   return result;
@@ -199,7 +198,7 @@ export function validateLectureScore(score) {
   return lecture;
 }
 
-export function buildLectureScore(material, adoptedByPage = new Map(), { title, interactionsByPage = new Map(), experimentsByPage = new Map() } = {}) {
+export function buildLectureScore(material, adoptedByPage = new Map(), { title, interactionsByPage = new Map() } = {}) {
   if (!Array.isArray(material?.pages) || !material.pages.length) throw new Error('请先导入有页码的原稿。');
   const name = material.name || material.title;
   const pages = [];
@@ -211,17 +210,16 @@ export function buildLectureScore(material, adoptedByPage = new Map(), { title, 
     const pageTitle = optionalText(page.title, `${field}标题`) || `第 ${number} 页`;
     const body = paragraphs(optionalText(page.text, `${field}正文`).split(/\r\n?|\n/u), field);
     if (body[0] === pageTitle) body.shift();
-    const experiment = experimentsByPage.get(number) ?? page.experiment;
     pages.push({
       number,
       title: pageTitle,
       body,
-      ...(page.formulas?.length && { formulas: page.formulas }),
       preview: page.preview,
       images: page.images,
       adopted: adoptedByPage.get(number)?.slides ?? [],
       interaction: interactionsByPage.get(number),
-      ...(experiment && { experiment }),
+      blocks: page.nativeBlocks ?? page.blocks,
+      speakerNotes: page.speakerNotes,
     });
   }
   pages.sort((a, b) => a.number - b.number);
@@ -239,33 +237,6 @@ export function lectureFrames(lecture) {
     { pageIndex, slideIndex: -1 },
     ...page.adopted.map((_, slideIndex) => ({ pageIndex, slideIndex })),
   ]) ?? [];
-}
-
-export function lectureOutline(lecture) {
-  const items = [];
-  for (const page of lecture?.pages ?? []) {
-    items.push({
-      index: items.length,
-      pageNumber: page.number,
-      title: page.title,
-      supplemental: false,
-      hasInteraction: Boolean(page.interaction),
-      experimentKind: page.experiment?.kind ?? null,
-      ...(page.experiment && { experiment: page.experiment }),
-    });
-    for (const slide of page.adopted) {
-      items.push({
-        index: items.length,
-        pageNumber: page.number,
-        title: slide.title,
-        supplemental: true,
-        hasInteraction: Boolean(page.interaction),
-        experimentKind: page.experiment?.kind ?? null,
-        ...(page.experiment && { experiment: page.experiment }),
-      });
-    }
-  }
-  return items;
 }
 
 export function locateLectureFrame(lecture, index) {
@@ -286,13 +257,13 @@ export function lectureFrame(lecture, index) {
   if (!frame) return null;
   const page = lecture.pages[frame.pageIndex];
   const slide = frame.slideIndex === -1 ? page : page.adopted[frame.slideIndex];
-  const { title, body, formulas, preview, images, omittedImages, points, series, xLabel, yLabel } = slide;
+  const { title, body, preview, images, omittedImages, points, series, xLabel, yLabel, blocks } = slide;
   return {
     title,
     body,
     source: { name: lecture.source.name, pageNumber: page.number },
     pageNumber: page.number,
-    ...(formulas?.length && { formulas }),
+    ...(blocks && {blocks}),
     ...(preview && { preview }),
     ...(images && { images }),
     ...(omittedImages && { omittedImages }),
@@ -300,6 +271,5 @@ export function lectureFrame(lecture, index) {
     ...(series && { series }),
     ...(xLabel && { xLabel }),
     ...(yLabel && { yLabel }),
-    ...(page.experiment && { experiment: page.experiment }),
   };
 }

@@ -1,6 +1,12 @@
 .git
 .openai
-.polyphony-rooms.json*
+.polyphony-rooms*
 .env*
 node_modules
+artifacts
+**/__pycache__
+**/*.db*
+**/*.sqlite*
+**/*.lectures
 *.log
+*.tap

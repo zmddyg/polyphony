@@ -1,14 +1,8 @@
-import {
-  advanceChallenge, angularStep, blackboxDiagnoses, blackboxInputs, blackboxReading, blindAngles,
-  challengeNames, diagnoses, fullCurveRms, initialSamples, lightAt, newChallenge, normalizeRcParams,
-  pointCount, presetTarget, publicChallenge, rcProbes, rcReading, voteChoices,
-} from '../core/challenge-lab.mjs';
+import { advanceChallenge, angularStep, blindAngles, challengeNames, diagnoses, fullCurveRms, initialSamples, lightAt, newChallenge, pointCount, presetTarget, probes, publicChallenge, rcReading, voteChoices } from '../core/challenge-lab.mjs';
 
 const renderedChallenges = new WeakMap();
 const percent = value => Number((100 * value).toFixed(1)) + '%';
 const points = value => Number((100 * value).toFixed(1)) + ' 个百分点';
-const formatNum = value => Number(Number(value).toPrecision(6));
-const formatSigned = value => value < 0 ? '−' + Math.abs(value) : String(value);
 const primary = (action, label) => `<button type="button" class="cx-primary" data-cx-action="${action}">${label}</button>`;
 const summary = (title, text) => `<p class="cx-summary"><b>${title}</b>${text}</p>`;
 const plot = {left: 52, right: 642, top: 27, bottom: 229};
@@ -18,7 +12,7 @@ const modelName = model => model.order === 1 ? '单周期干涉仪' : '双周期
 const trace = (count, sample) => Array.from({length: count + 1}, (_, i) =>
   `${i ? 'L' : 'M'}${plotX(360 * i / count).toFixed(2)} ${plotY(sample(i)).toFixed(2)}`).join(' ');
 const targetTrace = target => trace(pointCount, i => target[i % pointCount]);
-const presetLabels = {double: '双峰', single: '单谷', flat: '平顶脉冲'};
+const presetLabels = {double: '二倍频干涉滤波器', flat: '平顶光通信信道', single: '单级平衡 MZI'};
 const canOperate = role => role === 'teacher' || role === 'solo';
 
 function choices(items, action, state, role) {
@@ -42,100 +36,60 @@ function ballotHint(role) {
 }
 
 function rcCircuit(state) {
-  const params = normalizeRcParams(state.params);
-  const activeProbes = rcProbes(params);
-  const result = activeProbes.find(item => item.id === state.probe);
-  const rText = formatNum(params.resistanceKohm) + ' kΩ';
-  const cText = formatNum(params.capacitanceNf) + ' nF';
-  const vFinal = formatNum(params.finalV) + ' V';
-  const vInit = formatNum(params.initialV) + ' V';
+  const result = probes.find(item => item.id === state.probe);
   return `<figure class="cx-instrument">
-    <figcaption><span>RC 故障台</span><span>理想阶跃 · ${vInit} → ${vFinal}</span></figcaption>
-    <svg class="cx-circuit" viewBox="0 0 620 260" role="img" aria-label="${vFinal} 阶跃电源串联标称 ${rText} 电阻与 ${cText} 电容；电容初始电压为 ${vInit}。">
+    <div class="cx-fault-banner">故障特征：f₋₃dB 从 159.2 kHz 腰斩至 79.6 kHz（τ = 2.00 μs）</div>
+    <figcaption><span>RC 故障台</span><span>理想阶跃 · 5 V</span></figcaption>
+    <svg class="cx-circuit" viewBox="0 0 620 260" role="img" aria-label="高速 PD 前级，5 伏阶跃、10 千欧负载与 100 皮法总电容，零初值。">
       <g fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
         <path d="M105 112V66H234l7-10 10 20 10-20 10 20 10-20 10 20 7-10H458V129M458 145v61H105v-42"/>
         <circle cx="105" cy="138" r="26"/><path d="M97 128h16m-8-8v16m-8 15h16M434 129h48m-48 16h48"/>
       </g>
       <g fill="currentColor" font-family="inherit" font-size="17">
-        <text x="264" y="36" text-anchor="middle">R · 标称 ${rText}</text><text x="419" y="146" text-anchor="end">C · 标称 ${cText}</text>
-        <text x="105" y="239" text-anchor="middle">${vFinal}</text>
+        <text x="264" y="36" text-anchor="middle">Rₗ · 标称 10.0 kΩ</text><text x="419" y="146" text-anchor="end">Cₜₒₜ · 标称 100 pF</text>
+        <text x="105" y="239" text-anchor="middle">5 V</text>
       </g>
     </svg>
     <div class="cx-meter"><span>${result ? result.label : '仪表读数'}</span><strong>${result ? state.reading.toFixed(2) + ' ' + result.unit : '待测量'}</strong></div>
   </figure>`;
 }
 
+export function rcComparisonGraphic() {
+  const trace = (fn,x0,x1,y0,height) => Array.from({length:101},(_,i)=>`${i?'L':'M'}${(x0+(x1-x0)*i/100).toFixed(2)} ${(y0-height*fn(i/100)).toFixed(2)}`).join(' ');
+  const charge=trace(x=>1-Math.exp(-4*x),42,212,171,105);
+  // 1 kHz to 1 MHz, voltage gain in dB from 0 to -24.
+  const bode=trace(x=>10*Math.log10(1+(10**(3+3*x)/79577.4715)**2)/24,266,438,66,-105);
+  const current=amp=>trace(x=>amp/.5*Math.exp(-4*x),55,438,171,115);
+  const duplicate=d=>`<path class="cx-measured-c" d="${d}"/><path class="cx-measured-r" d="${d}"/>`;
+  return `<section class="cx-comparison" aria-label="RC 实测波形对比"><figure><figcaption>时域充电 &amp; 频域波特图（简并重合）</figcaption><svg viewBox="0 0 480 215" role="img" aria-label="两种故障充电电压与电压波特图完全重合"><g class="cx-axis"><text x="42" y="30">uC / V</text><text x="266" y="30">|H| / dB</text><text x="24" y="70">5</text><text x="24" y="175">0</text><text x="240" y="70">0</text><text x="232" y="175">−24</text><text x="42" y="199">0</text><text x="175" y="199">8 μs</text><text x="266" y="199">1 kHz</text><text x="402" y="199">1 MHz</text></g><path class="cx-grid" d="M42 60V171H212M266 60V171H438"/>${duplicate(charge)}${duplicate(bode)}</svg><p>凡仅依赖 τ=RC 的曲线完全无法区分</p><small><i class="cx-key-c"></i>C 翻倍　<i class="cx-key-r"></i>R 翻倍（虚线叠于同一轨迹）</small></figure>
+    <figure><figcaption>t = 0⁺ 合闸输入电流（一击劈分）</figcaption><svg viewBox="0 0 480 215" role="img" aria-label="初始电流0.50 mA与0.25 mA，按相同2微秒时间常数衰减"><path class="cx-grid" d="M55 40V171H438"/><path class="cx-measured-c" d="${current(.5)}"/><path class="cx-measured-r" d="${current(.25)}"/><g class="cx-axis"><text x="55" y="29">i / mA</text><text x="72" y="55" class="cx-label-c">C 翻倍 · 0.50 mA</text><text x="72" y="110" class="cx-label-r">R 翻倍 · 0.25 mA</text><text x="42" y="178">0</text><text x="55" y="199">0⁺</text><text x="405" y="199">8 μs</text></g></svg><p>i(0⁺)=5/R · 同一 τ，不同初始电流</p><small>5 V 理想阶跃模型计算轨迹 · 无噪声</small></figure></section>`;
+}
+
 function rcBody(state, role) {
   const operate = canOperate(role);
-  const params = normalizeRcParams(state.params);
-  const activeProbes = rcProbes(params);
-  const faultyTau = formatNum((2 * params.resistanceKohm * params.capacitanceNf) / 1000);
-  const deltaV = formatNum(params.finalV - params.initialV);
   let heading, body;
   if (state.step === 'measure') {
     heading = '这次测什么？';
-    body = choices(activeProbes, 'measure', state, role) + ballotHint(role);
+    body = choices(probes, 'measure', state, role) + ballotHint(role);
   } else if (state.step === 'diagnose') {
     heading = '这条读数支持哪种判断？';
     body = choices(diagnoses, 'diagnose', state, role) + ballotHint(role);
   } else {
-    const unit = activeProbes.find(item => item.id === state.probe).unit;
+    const unit = probes.find(item => item.id === state.probe).unit;
     const selected = diagnoses.find(item => item.id === state.choice).label;
     const why = {
-      early: `两台电路的时间常数都是 ${faultyTau} ms。即使把整条电容充电曲线都录下来，它们仍会重合。`,
+      early: '两台电路的时间常数都是 2.00 μs。即使录下完整电压波形，仍只能约束乘积 RC。',
+      bode: '两台电路的 −3 dB 带宽均为 79.58 kHz，完整电压波特图也重合；扫更多频点仍不能分离 R 和 C。',
       steady: '充稳后电流降为零，两台的电容两端都是电源电压。这个读数留下了两个解释。',
-      current: `刚接通时电容电压保持 ${formatNum(params.initialV)} V，初始电流由 (${deltaV} V) 除以电阻决定。这两个预测可以当场分开。`,
+      current: '刚接通时电容电压为零，初始电流由 5 V 除以电阻决定。这两个预测可以当场分开。',
     }[state.probe];
     heading = state.answer === state.choice ? '判断与读数相符' : '再看看另一台电路';
     body = `<p class="cx-copy">${role === 'solo' ? '你的判断' : '全班的判断'}是「${selected}」。把同一次测量放到两台候选电路上：</p>
       <table class="cx-table"><thead><tr><th>候选故障</th><th>预测读数</th><th>符合实测</th></tr></thead>
-      <tbody>${diagnoses.slice(0, 2).map(item => `<tr><th>${item.label}</th><td>${rcReading(item.id, state.probe, params).toFixed(2)} ${unit}</td><td>${state.compatible.includes(item.id) ? '符合' : '排除'}</td></tr>`).join('')}</tbody></table>
+      <tbody>${diagnoses.slice(0, 2).map(item => `<tr><th>${item.label}</th><td>${rcReading(item.id, state.probe).toFixed(2)} ${unit}</td><td>${state.compatible.includes(item.id) ? '符合' : '排除'}</td></tr>`).join('')}</tbody></table>
       <p class="cx-copy">${why}</p>${operate ? primary('reset', '换一台电路') : ''}`;
   }
-  return rcCircuit(state) + `<section class="cx-controls"><h3 tabindex="-1">${heading}</h3>${body}</section>`;
-}
-
-function blackboxInstrument(state) {
-  const probed = state.probe !== undefined;
-  return `<figure class="cx-instrument">
-    <figcaption><span>数字黑箱实验台</span><span>已知：0 → 0，2 → 4</span></figcaption>
-    <div class="cx-blackbox-stage" aria-label="数字黑箱输入输出面板">
-      <div class="cx-bb-seeds">
-        <div><span>初始样例 1</span><strong>0 → 0</strong></div>
-        <div><span>初始样例 2</span><strong>2 → 4</strong></div>
-      </div>
-      <div class="cx-bb-flow">
-        <div class="cx-bb-port"><span>输入 x</span><strong>${probed ? formatSigned(state.probe) : '待选'}</strong></div>
-        <div class="cx-bb-box"><b>黑箱规则</b><small>x² 或 2x</small></div>
-        <div class="cx-bb-port cx-bb-port--out"><span>输出 y</span><strong>${probed ? formatSigned(state.reading) : '—'}</strong></div>
-      </div>
-    </div>
-    <div class="cx-meter"><span>${probed ? `本轮测试：x = ${formatSigned(state.probe)}` : '单次测试机会'}</span><strong>${probed ? `y = ${formatSigned(state.reading)}` : '待投输入'}</strong></div>
-  </figure>`;
-}
-
-function blackboxBody(state, role) {
-  const operate = canOperate(role);
-  let heading, body;
-  if (state.step === 'probe') {
-    heading = '向黑箱投入哪个数字？';
-    body = choices(blackboxInputs, 'probe', state, role) + ballotHint(role);
-  } else if (state.step === 'diagnose') {
-    heading = '这个输出支持哪条规则？';
-    body = choices(blackboxDiagnoses, 'diagnose', state, role) + ballotHint(role);
-  } else {
-    const selected = blackboxDiagnoses.find(item => item.id === state.choice)?.label ?? '';
-    const indistinguishable = state.compatible.length > 1;
-    const why = indistinguishable
-      ? `当 x = ${formatSigned(state.probe)} 时，x² 和 2x 都输出 ${formatSigned(state.reading)}，这个点落在两条规则的重合处，无法区分。`
-      : `当 x = ${formatSigned(state.probe)} 时，x² 预测 ${formatSigned(blackboxReading('square', state.probe))}，2x 预测 ${formatSigned(blackboxReading('double', state.probe))}，一次实验即可证伪另一条规则。`;
-    heading = state.answer === state.choice ? '判断与观测相符' : '再对照两条规则的预测';
-    body = `<p class="cx-copy">${role === 'solo' ? '你的判断' : '全班的判断'}是「${selected}」。把 x = ${formatSigned(state.probe)} 代入两条候选规则：</p>
-      <table class="cx-table"><thead><tr><th>候选规则</th><th>预测输出</th><th>符合实测</th></tr></thead>
-      <tbody>${blackboxDiagnoses.slice(0, 2).map(item => `<tr><th>${item.label}</th><td>${formatSigned(blackboxReading(item.id, state.probe))}</td><td>${state.compatible.includes(item.id) ? '符合' : '排除'}</td></tr>`).join('')}</tbody></table>
-      <p class="cx-copy">${why}</p>${operate ? primary('reset', '换一个黑箱') : ''}`;
-  }
-  return blackboxInstrument(state) + `<section class="cx-controls"><h3 tabindex="-1">${heading}</h3>${body}</section>`;
+  return rcCircuit(state) + `<section class="cx-controls"><h3 tabindex="-1">${heading}</h3>${body}</section>` + (state.step === 'solved' ? rcComparisonGraphic() : '');
 }
 
 function graph(state, editable) {
@@ -179,16 +133,19 @@ function opticalBody(state, role) {
       choices(blindAngles.map(d => ({id:String(d), label:d+'°'})), 'test', state, role) + ballotHint(role);
   } else {
     const refit = state.step === 'refit';
-    title = refit ? '加入第四个点之后' : state.angle + '° 的盲测结果';
+    title = refit ? '新增测量纳入拟合后' : state.angle + '° 的盲测结果';
     const miss = Math.abs(state.predicted - state.observed);
     body = `<dl class="cx-readings"><div><dt>原预测</dt><dd>${percent(state.predicted)}</dd></div><div><dt>目标</dt><dd>${percent(state.observed)}</dd></div></dl>`;
     if (!refit) {
+      if (miss > .15) body += `<aside class="cx-insight cx-insight-alert" role="status"><strong>⚠️ 欠采样混叠翻车警报</strong><p>3 点训练误差 ${points(state.firstModel.trainingRms)} ≠ 物理模型正确</p><p>独立盲测相差 ${points(miss)}。训练点重合，不能证明两点之间的谱线。</p></aside>`;
       body += '<p class="cx-copy">在 ' + state.angle + '°，原预测与目标相差 <strong>' + points(miss) + '</strong>。</p>';
-      if (operate) body += primary('refit', '给它第四个点，再拟合');
+      if (operate) body += primary('refit', '把这次测量加入，再拟合');
     } else {
       const model = state.model;
-      body += summary(modelName(model), '重算后，在 ' + state.angle + '° 预测 ' + percent(lightAt(model, state.angle)) + '。') +
+      body += summary(modelName(model), '重算后，在 ' + state.angle + '° 预测 ' + percent(lightAt(model, state.angle)) + '。' + (state.orderJump ? ' 模型阶次已跃迁。' : ' 模型阶次保持不变。')) +
         '<p class="cx-copy">对照完整的 24 个目标点，均方根误差从 ' + points(fullCurveRms(state.firstModel, state.target)) + ' 变为 ' + points(fullCurveRms(model, state.target)) + '。</p>';
+      if (state.orderJump && state.firstModel.order === 1 && model.order === 2 && fullCurveRms(model,state.target) < fullCurveRms(state.firstModel,state.target) * .5) body += '<aside class="cx-insight cx-insight-success" role="status"><strong>✓ 模型结构跃迁</strong><p>阶数从 1 跳到 2，全谱 RMS 大幅下降。新增独立约束改变了模型结构。</p></aside>';
+      if (state.degreeOfFreedomLimited) body += '<aside class="cx-insight cx-insight-limit" role="status"><strong>📐 触及单级物理自由度上限</strong><p>单级 MZI 仅含单频余弦分量。全谱 RMS 仍 > 12%；欲综合平顶光滤波谱，须引入多级级联 MZI 或微环谐振腔，并以独立数据再验证。</p></aside>';
       if (operate) body += primary('reset', '再画一条曲线');
     }
   }
@@ -265,9 +222,9 @@ function enableDrawing(root, target) {
 }
 
 function sameBallot(prior, state) {
+  if (state.peer?.offlineDemo !== prior.peer?.offlineDemo) return false;
   if (state.peer?.choice !== prior.peer?.choice || state.peer?.reason !== prior.peer?.reason) return false;
-  if (state.kind === 'rc' && JSON.stringify(state.params ?? null) !== JSON.stringify(prior.params ?? null)) return false;
-  if (state.step === 'measure' || state.step === 'probe') return true;
+  if (state.step === 'measure') return true;
   if (state.step === 'diagnose') return state.probe === prior.probe && state.reading === prior.reading;
   if (state.step !== 'blind') return false;
   return state.target.length === prior.target.length &&
@@ -310,17 +267,11 @@ export function renderChallenge(root, state, {role = 'solo', turn = 0, action, v
   }
   const previousButton = root.contains(document.activeElement) ? document.activeElement.dataset : null;
   const draft = editable ? [...state.target] : null;
-  const rcParams = state.kind === 'rc' ? normalizeRcParams(state.params) : null;
-  const note = state.kind === 'rc'
-    ? `电阻或电容有一个变成了标称值的两倍。电容从 ${formatNum(rcParams.initialV)} V 开始充电，全班只有一次测量机会。`
-    : state.kind === 'blackbox'
-      ? '黑箱内置 x² 或 2x，已知 0→0、2→4。全班只投一个输入数字，看看能否当场区分两条规则。'
-      : '你决定想要的光强。机器用三个点搭一台干涉仪，再由你挑一个没给过它的点验收。';
-  const body = state.kind === 'rc' ? rcBody(state, role)
-    : state.kind === 'blackbox' ? blackboxBody(state, role)
-    : opticalBody(state, role);
-  root.innerHTML = `<article class="cx-shell"><header class="cx-heading"><h2>${challengeNames[state.kind] ?? '课堂实验'}</h2><p>${note}</p></header>
-    <div class="cx-grid-layout">${body}</div></article>`;
+  const rc = state.kind === 'rc';
+  const note = rc ? '高速 PD 前级标称 10.0 kΩ / 100 pF。误焊电阻或同轴寄生令 RC 翻倍：时域与频域电压都可能简并。全班只有一次测量机会。' :
+    '你决定想要的光强。机器用三个点搭一台干涉仪，再由你挑一个没给过它的点验收。';
+  root.innerHTML = `<article class="cx-shell"><header class="cx-heading"><h2>${challengeNames[state.kind]}</h2><p>${note}</p></header>
+    <div class="cx-grid-layout">${rc ? rcBody(state, role) : opticalBody(state, role)}</div></article>`;
   const ballots = Array.from(root.querySelectorAll('[data-cx-count]'), label => {
     const id = label.dataset.cxCount;
     const button = role === 'student' ? label.closest('button') : null;
@@ -335,21 +286,27 @@ export function renderChallenge(root, state, {role = 'solo', turn = 0, action, v
     note.className='cx-peer';
     const label=document.createElement('strong');
     const words=document.createElement('p');
-    label.textContent='AI 同桌选了「'+(options.find(item=>item.id===state.peer.choice)?.label ?? state.peer.choice)+'」';
+    label.textContent='AI 辩友选了「'+options.find(item=>item.id===state.peer.choice).label+'」';
     words.textContent=state.peer.reason;
     note.append(label,words);
+    if (state.peer.offlineDemo) {
+      const badge = document.createElement('span');
+      badge.className = 'cx-offline-badge';
+      badge.textContent = '离线预设推演示例';
+      note.prepend(badge);
+    }
     root.querySelector('.cx-controls').append(note);
-  } else if (role === 'teacher' && askPeer && options.length) {
+  } else if ((role === 'teacher' || role === 'solo') && askPeer && options.length) {
     const button = document.createElement('button');
     button.type='button';
     button.className='cx-peer-button';
-    button.textContent='让 AI 同桌也选一次';
+    button.textContent='召唤 AI 辩友（盲盒推理）';
     button.onclick=async()=>{
       button.disabled=true;
-      button.textContent='AI 同桌正在作答…';
+      button.textContent='AI 辩友正在作答…';
       try {await rendered.handlers.askPeer();}
       catch(error){rendered.handlers.report?.(error.message);}
-      finally {button.disabled=false;button.textContent='让 AI 同桌也选一次';}
+      finally {button.disabled=false;button.textContent='召唤 AI 辩友（盲盒推理）';}
     };
     root.querySelector('.cx-controls').append(button);
   }
@@ -370,7 +327,9 @@ export function renderSoloChallenge(root, kind) {
   let state = newChallenge(kind);
   let turn = 0;
   function paint() {
-    renderChallenge(root, publicChallenge(state), {turn, action(payload) {
+    renderChallenge(root, publicChallenge(state), {turn, askPeer: async () => {
+      state = advanceChallenge(state, { action: 'peer' }); paint();
+    }, action(payload) {
       state = advanceChallenge(state, payload);
       turn++;
       paint();

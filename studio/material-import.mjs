@@ -15,6 +15,7 @@ const MAX_RENDERED_PDF_BYTES = 64 * 1024 * 1024;
 const TEMP_PREFIX = 'polyphony-material-';
 const pdfScript = fileURLToPath(new URL('./tools/material-import-pdf.py', import.meta.url));
 const officeScript = fileURLToPath(new URL('./tools/material-import-libreoffice.py', import.meta.url));
+const powerpointScript = fileURLToPath(new URL('./tools/material-import-powerpoint.ps1', import.meta.url));
 const execute = promisify(execFile);
 const windows = process.platform === 'win32';
 let activeConversions = 0;
@@ -117,7 +118,7 @@ async function checkPython(candidates, statement) {
   for (const python of candidates) {
     try {
       await execute(python, ['-I', '-c', statement], {
-        env: subprocessEnvironment(tmpdir()), timeout: 4_000, maxBuffer: 4_096, windowsHide: true,
+        env: subprocessEnvironment(tmpdir()), timeout: 10_000, maxBuffer: 4_096, windowsHide: true,
       });
       return python;
     } catch {
@@ -127,9 +128,43 @@ async function checkPython(candidates, statement) {
   return null;
 }
 
+function powerpointWorkerArgs(...args) {
+  return ['-NoProfile', '-NonInteractive', '-File', powerpointScript, ...args];
+}
+
+function powerpointWorkerEnvironment() {
+  const allowed = new Set(['PATH', 'SYSTEMROOT', 'SYSTEMDRIVE', 'WINDIR', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)', 'COMMONPROGRAMFILES', 'COMMONPROGRAMFILES(X86)', 'TEMP', 'TMP', 'HOMEDRIVE', 'HOMEPATH', 'USERNAME', 'USERDOMAIN', 'COMPUTERNAME', 'PSMODULEPATH']);
+  return Object.fromEntries(Object.entries(process.env).filter(([key]) => allowed.has(key.toUpperCase())));
+}
+
+async function checkPowerpointWorker() {
+  const shell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  try {
+    await execute(shell, powerpointWorkerArgs('-Probe'), {
+      env: powerpointWorkerEnvironment(), timeout: 10_000, maxBuffer: 4_096, windowsHide: true,
+    });
+  } catch (error) {
+    if (['ENOENT', 'EACCES', 'EPERM'].includes(error.code) ||
+        /FullyQualifiedErrorId\s*:\s*UnauthorizedAccess\b|\bPSSecurityException\b/.test(error.stderr ?? '')) return null;
+    // Preserve conversion errors on the import route without disabling classroom status.
+  }
+  return shell;
+}
+
 async function detectRenderingTools(soffice, unoPython, pdfPython) {
   const office = await installedSoffice(soffice);
-  if (!office) return null;
+  if (!office) {
+    if(windows && !soffice) {
+      for (const base of [process.env.ProgramFiles,process.env['ProgramFiles(x86)']].filter(Boolean)) {
+        const executable = join(base, 'Microsoft Office', 'root', 'Office16', 'POWERPNT.EXE');
+        try { await access(executable); } catch { continue; }
+        const pdf=await checkPython(pythonCandidates(pdfPython),'try:\n import pymupdf\nexcept ImportError:\n import fitz');
+        const powerpoint = pdf && await checkPowerpointWorker();
+        return powerpoint ? { powerpoint, pdf } : null;
+      }
+    }
+    return null;
+  }
   const unoCandidates = pythonCandidates(unoPython);
   if (!unoPython && windows) unoCandidates.unshift(join(dirname(office), 'python.exe'));
   const [uno, pdf] = await Promise.all([
@@ -168,21 +203,25 @@ function stopRenderProcess(child) {
 
 function runOfficeWorker(tools, directory, args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(tools.uno, ['-I', officeScript, tools.office, ...args], {
+    const program = tools.powerpoint ?? tools.uno;
+    const workerArgs = tools.powerpoint ? powerpointWorkerArgs(...args) : ['-I', officeScript, tools.office, ...args];
+    const child = spawn(program, workerArgs, {
       cwd: directory,
       detached: !windows,
-      env: subprocessEnvironment(directory),
-      stdio: ['ignore', 'pipe', 'ignore'],
+      env: tools.powerpoint ? powerpointWorkerEnvironment() : subprocessEnvironment(directory),
+      stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
     let stdout = '';
+    let diagnostic='';
+    child.stderr.on('data',chunk=>{if(diagnostic.length<4096)diagnostic+=chunk;});
     let processError;
     const abort = error => {
       if (processError) return;
       processError = error;
       stopRenderProcess(child);
     };
-    const timer = setTimeout(() => abort(failure(504, '生成原页预览超时。')), 22_000);
+    const timer = setTimeout(() => abort(failure(504, '生成原页预览超时。')), tools.powerpoint?45_000:22_000);
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', chunk => {
       if (stdout.length + chunk.length > 4_096) abort(failure(422, '无法生成原页预览。'));
@@ -190,11 +229,12 @@ function runOfficeWorker(tools, directory, args) {
     });
     child.on('error', error => { processError ??= error; });
     child.on('close', code => {
+      if(process.env.POLYPHONY_DEBUG_IMPORT==='1'&&diagnostic)console.error(diagnostic);
       clearTimeout(timer);
       if (!windows) stopRenderProcess(child);
       if (processError) return reject(processError);
       if (code) return reject(failure(422, '无法生成原页预览。'));
-      try { resolve(JSON.parse(stdout)); } catch { reject(failure(422, '无法生成原页预览。')); }
+      try { resolve(JSON.parse(stdout.replace(/^\uFEFF/,''))); } catch { reject(failure(422, '无法生成原页预览。')); }
     });
   });
 }
@@ -212,6 +252,7 @@ async function renderPresentation(bytes, extension, legacy) {
       JSON.stringify(hidden),
     ]);
     if (conversion.error === 'page-limit') throw pageLimitError();
+    if (conversion.error === 'powerpoint-busy') throw failure(409,'PowerPoint 正在使用中。请关闭后重试，或导入同一课件的 PDF 以保留原页视觉。');
     if (conversion.error || !Array.isArray(conversion.hidden)) {
       throw failure(422, '无法生成与原课件逐页对应的预览。');
     }

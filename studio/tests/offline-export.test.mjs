@@ -17,7 +17,7 @@ function embeddedModules(html) {
   const { imports } = JSON.parse(match[1]);
   return Object.fromEntries(Object.entries(imports).map(([name, url]) => {
     assert.match(url, /^data:text\/javascript;charset=utf-8;base64,/);
-    return [name, Buffer.from(url.split(',')[1], 'base64').toString('utf8')];
+    return [name, Buffer.from(decodeURIComponent(url.split(',')[1]), 'base64').toString('utf8')];
   }));
 }
 
@@ -48,9 +48,10 @@ test('standalone exports include lazy dependencies and route styles', async () =
     assert.equal(Buffer.from(diagram, 'base64').toString('utf8'), svg.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n'));
     assert.ok(!modules['@polyphony/app.mjs'].includes(diagram), 'the app does not contain another copy of the diagram');
 
-    assert.ok(embeddedModules(playlabHtml)['@polyphony/views/challenge-preview.mjs']);
-    assert.match(playlabHtml, /href="#rc"/);
-    assert.doesNotMatch(playlabHtml, /data-view-style|polyphony-architecture/);
+    assert.ok(embeddedModules(playlabHtml)['@polyphony/views/lab.mjs']);
+    assert.match(playlabHtml, /\?view=lab/);
+    assert.match(playlabHtml, /data-view-style/);
+    assert.match(playlabHtml, /polyphony-architecture/);
   } finally {
     await Promise.all([rm(studio, {force:true}), rm(playlab, {force:true})]);
     await rmdir(dir);

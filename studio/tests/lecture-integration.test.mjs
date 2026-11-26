@@ -51,6 +51,15 @@ test('HTTP and SSE carry an imported binary PPT through teaching, answering, ret
   }
   const base=await http('/api/rooms',{demo:false});
   const prep='/api/rooms/'+base.data.room.code;const prepCookie=base.headers['set-cookie'][0].split(';')[0];
+  await t.test('dual-source author-deck endpoint requires teacher ownership and returns a verified 8-page native deck',async()=>{
+    const spec={course:'C语言',topic:'指针与函数传址',pageCount:8};
+    assert.equal((await http(prep+'/author-deck',{spec})).status,403);
+    const generated=await http(prep+'/author-deck',{spec},prepCookie);
+    assert.equal(generated.status,200);assert.equal(generated.data.lectureScore.pages.length,8);
+    assert(generated.data.harnessReceipt.stages.every(s=>s.status==='complete'));
+    assert.equal(generated.data.harnessReceipt.dryRuns.length,3);
+    assert.equal((await http(prep+'/author-deck',{spec:{...spec,pageCount:30}},prepCookie)).status,400);
+  });
   await t.test('a teacher can use Jev page planning without a chat model', async subtest => {
     const previousJev = process.env.POLYPHONY_JEV_KEY;
     process.env.POLYPHONY_JEV_KEY = 'local-test-key';
@@ -69,7 +78,7 @@ test('HTTP and SSE carry an imported binary PPT through teaching, answering, ret
       assert.deepEqual(JSON.parse(options.body).state.pages, pages);
       return Response.json({model:'jev-test', usage:{input_tokens:30,output_tokens:10},
         answers:{page_1:{type:'choice',choice:'mzi',confidence:0.96,
-          probabilities:{rc:0.01,mzi:0.95,history:0.01,blackbox:0.01,inquiry:0.01,none:0.01}}}});
+          probabilities:{rc:0.01,mzi:0.96,aliasing:0.01,concept:0.01,none:0.01}}}});
     });
     assert.equal((await http(prep+'/lecture-plan', {pages})).status, 403);
     const planned = await http(prep+'/lecture-plan', {pages}, prepCookie);

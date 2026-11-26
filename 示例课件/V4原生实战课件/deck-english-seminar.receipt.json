@@ -1,0 +1,163 @@
+{
+  "version": "polyphony.harness@1",
+  "pacingMode": "full-demo",
+  "stages": [
+    {
+      "id": "ingest",
+      "title": "原稿结构解析与证据编号",
+      "status": "complete",
+      "pageCount": 10,
+      "blockCount": 166
+    },
+    {
+      "id": "triage",
+      "title": "全卷脉络扫描与交互卡点规划",
+      "status": "complete",
+      "selectedPages": [
+        {
+          "pageNumber": 4,
+          "activityId": "concept-diagnosis@1",
+          "quote": "Match grammatical certainty to empirical support"
+        },
+        {
+          "pageNumber": 7,
+          "activityId": "step-fault@1",
+          "quote": "Aggregate → individual?"
+        },
+        {
+          "pageNumber": 8,
+          "activityId": "evidence-weighing@1",
+          "quote": "Evidence bank on the same slide"
+        }
+      ],
+      "untouchedPages": 7
+    },
+    {
+      "id": "synthesize",
+      "title": "模块化交互契约并发生成",
+      "status": "complete",
+      "source": "local",
+      "generatedPages": 3
+    },
+    {
+      "id": "verify_repair",
+      "title": "原页引文溯源、安全表达式与契约自修复",
+      "status": "complete",
+      "validatedPages": 3,
+      "repairCount": 0
+    },
+    {
+      "id": "dryrun_compile",
+      "title": "双轮状态机沙箱预演与上线教案编译",
+      "status": "complete",
+      "compiledPages": 10,
+      "format": "polyphony.lecture@1"
+    }
+  ],
+  "repairs": [],
+  "dryRuns": [
+    {
+      "pageNumber": 4,
+      "activityId": "concept-diagnosis@1",
+      "phase": "closed",
+      "round": 2,
+      "commands": [
+        "loadLesson",
+        "join",
+        "respond",
+        "reveal",
+        "analyze",
+        "branch",
+        "revise",
+        "respond",
+        "reveal",
+        "close"
+      ],
+      "responses": 2
+    },
+    {
+      "pageNumber": 7,
+      "activityId": "step-fault@1",
+      "phase": "closed",
+      "round": 2,
+      "commands": [
+        "loadLesson",
+        "join",
+        "respond",
+        "reveal",
+        "analyze",
+        "branch",
+        "revise",
+        "respond",
+        "reveal",
+        "close"
+      ],
+      "responses": 2
+    },
+    {
+      "pageNumber": 8,
+      "activityId": "evidence-weighing@1",
+      "phase": "closed",
+      "round": 2,
+      "commands": [
+        "loadLesson",
+        "join",
+        "respond",
+        "reveal",
+        "analyze",
+        "branch",
+        "revise",
+        "respond",
+        "reveal",
+        "close"
+      ],
+      "responses": 2
+    }
+  ],
+  "pageMemories": [
+    {
+      "pageNumber": 1,
+      "memories": []
+    },
+    {
+      "pageNumber": 2,
+      "memories": []
+    },
+    {
+      "pageNumber": 3,
+      "memories": []
+    },
+    {
+      "pageNumber": 4,
+      "memories": []
+    },
+    {
+      "pageNumber": 5,
+      "memories": []
+    },
+    {
+      "pageNumber": 6,
+      "memories": []
+    },
+    {
+      "pageNumber": 7,
+      "memories": []
+    },
+    {
+      "pageNumber": 8,
+      "memories": []
+    },
+    {
+      "pageNumber": 9,
+      "memories": []
+    },
+    {
+      "pageNumber": 10,
+      "memories": []
+    }
+  ],
+  "mode": "auto",
+  "versionId": "sha256-0e7b5543514dd26e24f1dea876629e05b3206f759e516779970167ddfa3393c3",
+  "contentDigest": "sha256-0e7b5543514dd26e24f1dea876629e05b3206f759e516779970167ddfa3393c3",
+  "source": "local"
+}

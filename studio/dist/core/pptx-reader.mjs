@@ -1,5 +1,4 @@
 import { openPptxPackage, packageRelationshipsPart, resolvePackagePart } from './pptx-package.mjs';
-import { ommlToMathML } from './mathml.mjs';
 
 const MB = 1024 * 1024;
 const MAX_SLIDES = 1_000;
@@ -447,36 +446,30 @@ function mathText(node) {
   return values.join(['oMathPara', 'eqArr'].includes(name) ? '\n' : '');
 }
 
-const mathHelpers = { is, child, children, on, mathProperty };
-
-function inlineText(node, warnings, formulas) {
+function inlineText(node, warnings) {
   if (is(node, 'a', 't')) return node.textContent;
   if (is(node, 'a', 'br')) return '\n';
   if (is(node, 'a', 'tab')) return '\t';
   if (is(node, 'm', 'oMath') || is(node, 'm', 'oMathPara')) {
     warnings.add(warning.math);
-    if (formulas && formulas.length < 16) {
-      const mml = ommlToMathML(node, mathHelpers);
-      if (mml && !formulas.includes(mml)) formulas.push(mml);
-    }
     return mathText(node);
   }
   if (is(node, 'a14', 'm') || is(node, 'a', 'p') || is(node, 'a', 'r') || is(node, 'a', 'fld')) {
-    return [...children(node)].map(element => inlineText(element, warnings, formulas)).join('');
+    return [...children(node)].map(element => inlineText(element, warnings)).join('');
   }
   return '';
 }
 
-function richText(element, warnings, formulas) {
+function richText(element, warnings) {
   return [...children(element)].filter(node => is(node, 'a', 'p'))
-    .map(node => inlineText(node, warnings, formulas)).join('\n').trim();
+    .map(node => inlineText(node, warnings)).join('\n').trim();
 }
 
-function tableText(table, warnings, formulas) {
+function tableText(table, warnings) {
   const rows = [...children(table)].filter(row => is(row, 'a', 'tr')).map(row => {
     const cells = [...children(row)].filter(cell => is(cell, 'a', 'tc')).map(cell => {
       if (on(cell.getAttribute('hMerge')) || on(cell.getAttribute('vMerge'))) return '';
-      return richText(child(cell, 'a', 'txBody'), warnings, formulas).replace(/\n/gu, ' / ');
+      return richText(child(cell, 'a', 'txBody'), warnings).replace(/\n/gu, ' / ');
     });
     return cells.some(Boolean) ? cells.join(' ｜ ').trim() : '';
   }).filter(Boolean);
@@ -550,8 +543,8 @@ async function readDiagram(node, parts, relationships, warnings) {
   return paragraphs.length ? 'SmartArt\n' + paragraphs.join('\n') : '';
 }
 
-async function readShape(node, parts, relationships, warnings, formulas) {
-  const text = richText(child(node, 'p', 'txBody'), warnings, formulas);
+async function readShape(node, parts, relationships, warnings) {
+  const text = richText(child(node, 'p', 'txBody'), warnings);
   const drawing = is(node, 'p', 'sp') && !text && !placeholder(node) && !matching(node, 'a', 'blip').length;
   if (drawing || is(node, 'p', 'cxnSp') || is(node, 'p', 'contentPart')) {
     warnings.add(warning.drawing);
@@ -559,7 +552,7 @@ async function readShape(node, parts, relationships, warnings, formulas) {
   if (!is(node, 'p', 'graphicFrame')) return text;
   const blocks = [];
   for (const item of descendants(node)) {
-    if (is(item, 'a', 'tbl')) blocks.push(tableText(item, warnings, formulas));
+    if (is(item, 'a', 'tbl')) blocks.push(tableText(item, warnings));
     if (is(item, 'c', 'chart') || is(item, 'cx', 'chart')) blocks.push(await readChart(item, parts, relationships, warnings));
     if (is(item, 'dgm', 'relIds')) blocks.push(await readDiagram(item, parts, relationships, warnings));
   }
@@ -662,28 +655,6 @@ function unavailablePage(number, sourcePath, reason) {
   return { number, title: '第 ' + number + ' 页', text: '', sourcePath, hidden: false, images: [], warnings: [reason] };
 }
 
-async function readSpeakerNotes(relationships, parts) {
-  const relation = relatedPart(relationships, 'notesSlide');
-  if (!relation?.path || relation.external) return '';
-  try {
-    const root = await parts.xml(relation.path, false);
-    if (!is(root, 'p', 'notes')) return '';
-    const spTree = child(child(root, 'p', 'cSld'), 'p', 'spTree');
-    const blocks = [];
-    const ignored = new Set();
-    for (const { node } of shapes(spTree)) {
-      if (!is(node, 'p', 'sp')) continue;
-      const phType = placeholder(node)?.getAttribute('type');
-      if (phType && phType !== 'body') continue;
-      const text = richText(child(node, 'p', 'txBody'), ignored);
-      if (text) blocks.push(text);
-    }
-    return shorten(blocks.join('\n\n').trim(), 2000);
-  } catch {
-    return '';
-  }
-}
-
 async function readPage(number, sourcePath, slideSize, parts) {
   if (!parts.archive.part(sourcePath)) return unavailablePage(number, sourcePath, warning.missingSlide);
   let root;
@@ -699,7 +670,6 @@ async function readPage(number, sourcePath, slideSize, parts) {
   const master = await parts.inheritedLayer(layout?.relationships, 'slideMaster', warnings);
   const visibleMaster = !off(root.getAttribute('showMasterSp')) && !off(layout?.root.getAttribute('showMasterSp'));
   const text = [];
-  const formulas = [];
   const images = new Map();
   let title;
   let namedTitle;
@@ -712,7 +682,7 @@ async function readPage(number, sourcePath, slideSize, parts) {
       const original = await collectImages(shape.node, parts, layer.relationships, warnings, images);
       if (layer === slide && slide.shapes.length === 1 && fullPageRaster(shape, original, slideSize)) preview = original.src;
       if (shape.fallback) continue;
-      const block = await readShape(shape.node, parts, layer.relationships, warnings, layer === slide ? formulas : null);
+      const block = await readShape(shape.node, parts, layer.relationships, warnings);
       if (!block) continue;
       text.push(block);
       if (layer === slide && !title && isTitlePlaceholder(shape.node, layout?.placeholderKinds, master?.placeholderKinds)) {
@@ -724,14 +694,11 @@ async function readPage(number, sourcePath, slideSize, parts) {
       }
     }
   }
-  const speakerNotes = await readSpeakerNotes(slide.relationships, parts);
   const body = text.join('\n\n');
   if (body.length > MAX_PAGE_TEXT) warnings.add(warning.textLimit);
   return {
     number, sourcePath, title: pageTitle(slide, title || namedTitle, number), text: shorten(body, MAX_PAGE_TEXT),
     hidden: off(root.getAttribute('show')), images: [...images.values()], warnings: [...warnings],
-    ...(formulas.length && { formulas }),
-    ...(speakerNotes && { speakerNotes }),
     ...(preview && { preview }),
   };
 }

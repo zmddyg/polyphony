@@ -1,18 +1,16 @@
 import { renderSoloChallenge } from './challenge-lab.mjs';
-
-const kinds = ['light', 'rc', 'blackbox'];
+import { mountMzmInstrument } from './mzm-instrument.mjs';
 
 function selectChallenge() {
-  const hash = location.hash.slice(1);
-  const selected = kinds.includes(hash) ? hash : 'light';
-  for (const kind of kinds) {
+  const selected = ['#rc','#light'].includes(location.hash) ? location.hash.slice(1) : 'optics';
+  for (const kind of ['optics','light','rc']) {
     const root = document.getElementById(kind);
     root.hidden = kind !== selected;
-    const link = document.querySelector('nav a[href="#' + kind + '"]');
+    const link = document.querySelector('nav a[href="#'+kind+'"]');
     if (root.hidden) link.removeAttribute('aria-current');
     else {
       link.setAttribute('aria-current', 'page');
-      if (!root.firstElementChild) renderSoloChallenge(root, kind);
+      if (!root.firstElementChild) kind === 'optics' ? mountMzmInstrument(root) : renderSoloChallenge(root, kind);
     }
   }
 }

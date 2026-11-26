@@ -1,528 +1,194 @@
 import { renderLectureFrame } from './lecture-stage.mjs';
-import { renderDesk } from './desk.mjs';
-import { renderStudent } from './student.mjs';
-import { renderStage } from './surfaces.mjs';
-import { challengeNames } from '../core/challenge-lab.mjs';
-import { challengeForFrame } from '../core/lecture-planner.mjs';
-import { createMaterialNotebook } from '../core/material-notebook.mjs';
+import { moduleHtml, bindModule } from './module-renderer.mjs';
+import { cognitionReport } from '../core/cognition.mjs';
 import { renderChallenge } from './challenge-lab.mjs';
 
-const rooms = new WeakMap();
-const experiments = new WeakMap();
-const resultSteps = new Set(['solved', 'tested', 'refit']);
-const frameCache = new Map();
-const outlineCache = new Map();
-const notebook = createMaterialNotebook();
-let activeOutlineController = null;
+const players=new WeakMap();
+const names={'concept-diagnosis@1':'概念诊断','step-fault@1':'逐行找茬','param-explorer@1':'公式沙盒','evidence-weighing@1':'证据权衡'};
+const publicPhases=new Set(['reveal','branch','closed']);
+const phaseNames={collect:'独立作答',reveal:'本轮结果',branch:'机制讨论',closed:'本页已完成'};
+const btn=(action,label,extra='')=>`<button type="button" data-inline-action="${action}" ${extra}>${label}</button>`;
 
-function cacheFrame(code, index, frame) {
-  const key = `${code}:${index}`;
-  frameCache.delete(key);
-  frameCache.set(key, frame);
-  while (frameCache.size > 32) frameCache.delete(frameCache.keys().next().value);
+export function lectureTakeaways(state) {
+  const cards=new Map((state.lectureTakeaways??[]).map(s=>[s.pageNumber,s]));
+  for(const s of state.lectureArchive??[])if(s.phase==='closed')cards.set(s.pageNumber,{pageNumber:s.pageNumber,title:s.lesson.title,...(s.lesson.takeaway??s.lesson.moduleConfig?.takeaway??{})});
+  if(state.lecture?.mode==='activity'&&state.phase==='closed')cards.set(state.lecture.pageNumber,{pageNumber:state.lecture.pageNumber,title:state.lesson.title,...(state.lesson.takeaway??state.lesson.moduleConfig?.takeaway??{})});
+  return [...cards.values()].sort((a,b)=>a.pageNumber-b.pageNumber);
+}
+export function takeawayDrawerHtml(state,e) {
+  const cards=lectureTakeaways(state);
+  return `<details class="native-takeaways"><summary>📚 本堂已解锁考前速查卡 (${cards.length})</summary>${cards.length?cards.map(c=>`<article><h3>P${c.pageNumber} · ${e(c.title)}</h3><p>${e(c.formula??c.summary??'')}</p>${c.formula&&c.summary?'<p>'+e(c.summary)+'</p>':''}<p class="takeaway-pitfall">${e(c.pitfall??'')}</p></article>`).join(''):'<p>完成本页互动后，机制与避坑提示会留在这里。</p>'}</details>`;
+}
+export function inlineResultsHtml(state,e) {
+  const report=cognitionReport(state),published=publicPhases.has(state.phase);
+  const responses=(state.responses??[]).filter(r=>r.round===state.round);
+  const count=state.responseCount??responses.length,simulated=state.simulatedResponseCount??responses.filter(r=>r.simulated).length;
+  let html=`<div class="inline-live-count"><b>${count}</b> 份作答 · 第 ${state.round} 轮${simulated?` <span>含${simulated}份模拟</span>`:''}</div>`;
+  if(!published)return html+'<p class="inline-collecting">先独立判断，公布后一起检查机制。</p>';
+  if(state.lesson.activityId!=='step-fault@1')html+=`<div class="inline-distribution">${state.lesson.options.map(o=>{const n=responses.filter(r=>r.optionId===o.id).length;return `<div><span>${e(o.id)} · ${e(o.label)}</span><b>${n}</b><i style="width:${responses.length?n/responses.length*100:0}%"></i></div>`;}).join('')}</div>`;
+  const first=state.responses?.filter(r=>r.round===1)??[];
+  const correct=state.lesson.correctOptionId;
+  const initialWrong=first.find(r=>r.optionId!==correct),initialRight=first.find(r=>r.optionId===correct);
+  const pair=state.analysis?.contrastPair??state.firstRoundAnalysis?.contrastPair??state.firstRoundContrastPair??(state.round===2&&correct&&initialWrong?.reason&&initialRight?.reason?[{sideLabel:'首轮直觉 · 待检验',quote:initialWrong.reason},{sideLabel:'首轮机制 · 原页证据',quote:initialRight.reason}]:null);
+  if(state.analysis?.summary&&!pair?.length)html+='<p class="inline-analysis-note">'+e(state.analysis.summary)+'</p>';
+  if(pair?.length)html+=`<div class="inline-reason-split">${pair.slice(0,2).map((p,i)=>`<article class="reason-${i?'blue':'red'}"><b>${e(p.sideLabel??'理由对照')}</b><p>${e(p.quote)}</p></article>`).join('')}</div>`;
+  if(state.round===2)html+=`<div class="inline-paired">二轮配对跃迁：${report.paired.changed} / ${report.paired.total} 人改变判断${report.paired.source==='simulated'?'（模拟）':''}${report.secondCorrect!=null?' · 本轮正确率 '+report.secondCorrect+'%':''}</div>`;
+  if(state.phase==='closed')html+=`<div class="inline-feedback"><b>${state.lesson.correctOptionId?'本页参考答案：'+e(state.lesson.correctOptionId):'本页没有唯一标准立场'}</b><p>${e(state.lesson.takeaway?.summary??state.lesson.moduleConfig?.takeaway?.summary??'请用证据检验原判断。')}</p></div>`;
+  return html;
+}
+function fullscreen(root,ctx) {
+  if(document.fullscreenElement)return document.exitFullscreen().catch(()=>{});
+  root.requestFullscreen?.().catch(()=>ctx.toast('浏览器未能进入全屏。'));
+}
+export function renderLectureRoom(root,ctx,role) {
+  const lecture=ctx.state.lecture,teacher=role==='teacher',student=role==='student',e=ctx.esc;
+  const remote=teacher&&ctx.remote;
+  let entry=players.get(root);
+  const key=ctx.state.code+'-'+(remote?'remote':role)+'-'+lecture.index+'-'+(lecture.mode==='ended');
+  if(!entry||entry.key!==key||!root.querySelector('[data-native-player]')) {
+    entry?.dispose?.();entry?.observer?.disconnect();
+    entry={key,ctx,drafts:new Map()};players.set(root,entry);
+    root.innerHTML=`<section data-native-player class="native-player native-player--${role}${remote?' native-player--remote':''}">
+      <header class="native-player-bar"><div><b>${e(lecture.title)}</b><p>${remote?'手机遥控':student?'同步放映中':'原生流式互动课件播放器'} · 第 ${lecture.index+1} / ${lecture.total} 页</p>${remote?'<p class="remote-page-title">'+e(lecture.filmstrip?.[lecture.index]?.title??'')+'</p>':''}</div><div>${remote?'<span data-remote-status role="status"></span>':(teacher?btn('stage','打开投影')+btn('invite','邀请学生'):'')+(!student?btn('fullscreen','全屏'):'')}</div></header>
+      <div class="native-canvas ${student?'native-mobile-card':''}" id="${student?'student':'stage'}"><div class="native-layout"><div data-native-slide><p role="status">正在载入授课页…</p></div><aside data-inline-widget class="native-inline" hidden aria-label="本页原生互动"></aside></div></div>
+      ${teacher?`<footer class="presenter-dock"><div class="presenter-pager">${btn('previous','◀ 上一页',lecture.index===0?'disabled':'')}<nav class="native-filmstrip" aria-label="课件缩略导航">${Array.from({length:lecture.total},(_,i)=>{const s=lecture.filmstrip?.[i];return `<button type="button" data-slide-index="${i}" aria-current="${i===lecture.index?'page':'false'}" title="${e(s?.title??'第'+(i+1)+'页')}"><span>${i+1}</span>${s?.activityId?'<small>'+e(names[s.activityId]??'互动')+'</small>':'<small>讲授</small>'}</button>`;}).join('')}</nav>${btn('next','下一页 ▶',lecture.index===lecture.total-1?'disabled':'')}</div><div data-presenter-controls class="presenter-controls"></div><div class="presenter-utility">${btn('finish','结束授课')}<span>← / → / PageUp / PageDown / Space 翻页 · 互动自动留档</span></div></footer>`:''}
+      ${role==='stage'?`<footer class="stage-filmstrip" aria-label="课件放映进度">${Array.from({length:lecture.total},(_,i)=>{const s=lecture.filmstrip?.[i];return `<span aria-current="${i===lecture.index?'page':'false'}"><b>${i+1}</b><small>${e(names[s?.activityId]??'讲授')}</small></span>`;}).join('')}</footer>`:''}
+      <div data-takeaway-drawer></div><p class="native-status" data-native-status role="status"></p></section>`;
+    const execute=async(type,payload={})=>{
+      if(entry.busy)return null;entry.busy=true;
+      try{return await entry.ctx.command(type,payload);}catch(error){entry.ctx.toast(error.message);return null;}finally{entry.busy=false;}
+    };
+    entry.execute=execute;
+    root.querySelectorAll('[data-slide-index]').forEach(b=>b.onclick=()=>execute('lectureNavigate',{index:Number(b.dataset.slideIndex)}));
+    root.addEventListener('click',entry.listener=event=>{
+      if(players.get(root)!==entry)return;
+      const action=event.target.closest('[data-inline-action]')?.dataset.inlineAction;
+      if(!action)return;
+      const c=entry.ctx,s=c.state,l=s.lecture;
+      if(action==='stage')return c.open('stage');
+      if(action==='invite')return c.invite();
+      if(action==='fullscreen')return fullscreen(root,c);
+      if(action==='previous'||action==='next')return execute('lectureNavigate',{index:l.index+(action==='next'?1:-1)});
+      if(action==='finish')return execute('lectureFinish');
+      if(action==='interact')return execute('lectureInteract');
+      if(action==='branch')return execute('branch',{branchId:root.querySelector('[data-inline-branch]').value});
+      if(action==='retry'){entry.failed=false;entry.framePending=false;return loadFrame();}
+      if(['demoFill','reveal','analyze','revise','close','toggleAiPeer'].includes(action))return execute(action);
+    });
+    entry.dispose=()=>root.removeEventListener('click',entry.listener);
+  }
+  entry.ctx=ctx;
+  const command=entry.execute;
+  function loadFrame() {
+    if(entry.framePending||entry.frameLoaded)return;
+    entry.framePending=true;
+    ctx.getFrame(lecture.index).then(frame=>{
+      if(players.get(root)!==entry||!root.isConnected)return;
+      entry.frameLoaded=true;
+      renderLectureFrame(root.querySelector('[data-native-slide]'),frame,{compact:student});
+      root.querySelector('[data-native-slide]').classList.toggle('has-rich-blocks',Boolean(frame.blocks?.length));
+      fitContent();
+    }).catch(error=>{
+      if(players.get(root)!==entry)return;
+      entry.failed=true;root.querySelector('[data-native-slide]').innerHTML='<p role="alert">'+e(error.message)+'</p>'+btn('retry','重新载入');
+    });
+  }
+  function fitContent() {
+    if(student)return;
+    const slide=root.querySelector('[data-native-slide]'),frame=slide?.firstElementChild;
+    if(!frame)return;
+    // Code-line voting belongs beside the teaching code, within the same canvas.
+    // Preserve the right column for contrasting reasons and paired-round feedback.
+    if(!student&&ctx.state.lesson.activityId==='step-fault@1'&&ctx.state.lecture.mode==='activity') {
+      const artifact=root.querySelector('[data-inline-widget] .module-artifact');
+      const original=frame.querySelector('.slide-code');
+      if(artifact&&original){frame.querySelector('[data-inline-step-artifact]')?.remove();original.hidden=true;artifact.dataset.inlineStepArtifact='';original.after(artifact);}
+    }
+    frame.style.zoom='1';
+    const available=slide.clientHeight;
+    let frameZoom=1;
+    for(let pass=0;pass<5&&available;pass++){const height=frame.getBoundingClientRect().height;if(height<=available-4)break;frameZoom*=(available-4)/height*.97;frame.style.zoom=String(frameZoom);}
+    const inline=root.querySelector('[data-inline-widget]'),content=inline?.querySelector('.inline-content');
+    if(content&&!inline.hidden){
+      content.style.zoom='1';const style=getComputedStyle(inline),space=inline.clientHeight-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom)-8;
+      let zoom=1;
+      for(let pass=0;pass<5;pass++){const height=content.getBoundingClientRect().height;if(height<=space)break;zoom*=space/height*.97;content.style.zoom=String(zoom);}
+    }
+  }
+  const shell=root.querySelector('[data-native-player]');
+  if(lecture.mode==='ended') {
+    shell.innerHTML=`<section class="lecture-ended"><h1>本节课已结束</h1><p>${e(lecture.title)}</p>${takeawayDrawerHtml(ctx.state,e)}</section>`;
+    return;
+  }
+  if(!remote)loadFrame();
+  const active=lecture.mode==='activity',experiment=lecture.mode==='experiment'&&ctx.state.experiment;
+  shell.dataset.inlineActivity=active?ctx.state.lesson.activityId:'';
+  shell.dataset.lectureMode=lecture.mode;
+  shell.dataset.phase=ctx.state.phase;
+  if(remote) {
+    const count=ctx.state.responseCount??ctx.state.responses.filter(response=>response.round===ctx.state.round).length;
+    const label=ctx.connected?'已连接':'正在重连';
+    root.querySelector('[data-remote-status]').textContent=active?`${label} · ${count} 份作答`:label;
+  }
+  root.querySelector('.native-layout').classList.toggle('has-inline-interaction',active||Boolean(experiment));
+  const widget=root.querySelector('[data-inline-widget]');widget.hidden=!(active||experiment);
+  if(active&&!remote)paintInteraction(widget,entry,role);
+  else if(experiment)renderChallenge(widget,ctx.state.experiment,{role,turn:lecture.turn,action:p=>command('lectureExperimentAct',p),vote:choice=>command('experimentVote',{choice}),askPeer:ctx.askPeer,report:ctx.toast});
+  const controls=root.querySelector('[data-presenter-controls]');
+  if(controls) {
+    const s=ctx.state;
+    controls.innerHTML=active?`${btn('demoFill','注入模拟作答',s.phase!=='collect'?'disabled':'')}${btn('reveal','公布本页结果',s.phase!=='collect'?'disabled':'')}${btn('analyze','整理理由对撞',!['reveal','branch'].includes(s.phase)?'disabled':'')}${s.round===1&&['reveal','branch'].includes(s.phase)?`<label>选择教学分支<select data-inline-branch>${s.lesson.branches.map(b=>`<option value="${e(b.id)}" ${b.id===s.decision?.branchId?'selected':''}>${e(b.title)}</option>`).join('')}</select></label>${btn('branch','采用教学分支')}${btn('revise','开启二轮',s.phase!=='branch'?'disabled':'')}`:''}${s.lesson.activityId==='evidence-weighing@1'?btn('toggleAiPeer',s.aiPeerRevealed?'收起 AI 辩友':'亮出 AI 辩友'):''}${btn('close','完成本页互动',!['reveal','branch'].includes(s.phase)?'disabled':'')}`:lecture.hasInteraction?btn('interact','开启本页互动 · 同页融合'):'';
+  }
+  const drawer=root.querySelector('[data-takeaway-drawer]');
+  const drawerOpen=drawer.querySelector('details')?.open;drawer.innerHTML=takeawayDrawerHtml(ctx.state,e);if(drawerOpen)drawer.querySelector('details').open=true;
+  root.querySelector('[data-native-status]').textContent=active?'同页原生融合态 · '+phaseNames[ctx.state.phase]+' · 翻页会保存本页状态':'';
+  if(remote)return;
+  // Fit synchronously too: background teacher/stage tabs throttle animation frames.
+  fitContent();
+  requestAnimationFrame(()=>{if(players.get(root)===entry)fitContent();});
+  if(!entry.observer&&typeof ResizeObserver!=='undefined'){entry.observer=new ResizeObserver(fitContent);entry.observer.observe(root.querySelector('.native-canvas'));}
 }
 
-function loadFrameCached(ctx, code, index) {
-  const key = `${code}:${index}`;
-  if (frameCache.has(key)) return Promise.resolve(frameCache.get(key));
-  return ctx.getFrame(index).then(frame => {
-    cacheFrame(code, index, frame);
-    return frame;
+function paintInteraction(host,entry,role) {
+  const ctx=entry.ctx,{state,esc:e}=ctx,lesson=state.lesson,student=role==='student';
+  const participant=state.participants.find(p=>p.id===ctx.participantId),mine=state.responses.find(r=>r.participantId===ctx.participantId&&r.round===state.round);
+  const key=lesson.id+'-'+state.round;
+  let draft=entry.drafts.get(key);if(!draft){draft={optionId:mine?.optionId??'',reason:mine?.reason??'',name:'',params:null};entry.drafts.set(key,draft);}
+  const focused=host.contains(document.activeElement)?document.activeElement:null;
+  const focusName=focused?.getAttribute('name'),selection=focused?.selectionStart;
+  const signature=JSON.stringify([state.phase,state.round,state.responses,state.responseCount,state.analysis,state.aiPeerRevealed,Boolean(participant),state.decision]);
+  if(entry.widgetSignature===signature)return;entry.widgetSignature=signature;
+  const collecting=state.phase==='collect';
+  host.innerHTML=`<div class="inline-content"><header class="inline-heading"><span>${e(names[lesson.activityId]??'课堂互动')}</span><b>${phaseNames[state.phase]} · R${state.round}</b></header><p class="inline-prompt">${e(state.revisionPrompt??lesson.prompt)}</p>
+    ${moduleHtml(lesson,state,{selectable:student&&collecting&&Boolean(participant),selectedId:draft.optionId})}
+    ${!student&&collecting&&lesson.activityId!=='step-fault@1'?'<div class="inline-choice-list">'+lesson.options.map(o=>'<div><b>'+e(o.id)+'</b> '+e(o.label)+'</div>').join('')+'</div>':''}
+    ${student&&collecting?participant?`<form data-inline-response><div class="inline-options">${lesson.activityId==='step-fault@1'?'':lesson.options.map(o=>`<label><input type="radio" name="optionId" value="${e(o.id)}" ${draft.optionId===o.id?'checked':''} required><span>${e(o.label)}</span></label>`).join('')}</div><div class="inline-capsules" aria-label="三秒理由">${(lesson.quickReasons??lesson.moduleConfig?.quickReasons??[]).map((r,i)=>`<button type="button" data-reason="${i}" aria-pressed="${draft.reason===r}">${e(r)}</button>`).join('')}</div><label class="inline-reason">我的理由（可点选或补充）<textarea name="reason" rows="2" maxlength="1000">${e(draft.reason)}</textarea></label><button class="inline-submit">${mine?'更新本轮判断':'提交本轮判断'}</button>${mine?'<p class="inline-submitted">✓ 已提交；公布前可修改</p>':''}</form>`:`<form data-inline-join><label>课堂显示名<input name="name" value="${e(draft.name)}" required maxlength="48" autocomplete="nickname"></label><button class="inline-submit">加入课堂并在本页作答</button></form>`:''}
+    ${inlineResultsHtml(state,e)}${student&&!collecting&&mine?'<p class="inline-my-answer">我的本轮判断：'+e(mine.optionId)+' · '+e(mine.reason)+'</p>':''}${state.decision?'<p class="inline-branch">教学分支：'+e(state.decision.title)+'</p>':''}</div>`;
+  bindModule(host,lesson,{command:entry.execute});
+  host.querySelectorAll('[data-step-select]').forEach(b=>b.onclick=()=>{draft.optionId=b.dataset.stepSelect;host.querySelectorAll('[data-step-select]').forEach(s=>s.setAttribute('aria-pressed',String(s===b)));});
+  host.querySelectorAll('[name=optionId]').forEach(input=>input.onchange=()=>{draft.optionId=input.value;});
+  host.querySelector('[name=reason]')?.addEventListener('input',event=>{draft.reason=event.target.value;});
+  host.querySelector('[name=name]')?.addEventListener('input',event=>{draft.name=event.target.value;});
+  host.querySelectorAll('[data-reason]').forEach(b=>b.onclick=()=>{draft.reason=(lesson.quickReasons??lesson.moduleConfig.quickReasons)[Number(b.dataset.reason)];host.querySelector('[name=reason]').value=draft.reason;host.querySelectorAll('[data-reason]').forEach(c=>c.setAttribute('aria-pressed',String(c===b)));});
+  host.onmoduleparamschange=event=>{draft.params=event.detail;};
+  if(!entry.paramsBound){host.addEventListener('moduleparamschange',event=>host.onmoduleparamschange?.(event));entry.paramsBound=true;}
+  if(draft.params)for(const [symbol,value] of Object.entries(draft.params)){const i=lesson.moduleConfig.sliders?.findIndex(s=>s.symbol===symbol);const input=host.querySelector(`[data-module-slider="${i}"]`);if(input){input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));}}
+  host.querySelector('[data-inline-response]')?.addEventListener('submit',async event=>{
+    event.preventDefault();if(!draft.optionId)return ctx.toast('请先选择一个选项或代码行。');
+    const payload={participantId:ctx.participantId,optionId:draft.optionId,reason:draft.reason};
+    if(draft.params)payload.reason=(payload.reason+'\n沙盒参数：'+Object.entries(draft.params).map(([k,v])=>k+'='+v).join(', ')).slice(0,1000);
+    await entry.execute('respond',payload);
   });
+  host.querySelector('[data-inline-join]')?.addEventListener('submit',event=>{event.preventDefault();void entry.execute('join',{participantId:ctx.participantId,name:draft.name});});
+  if(focusName){const input=host.querySelector(`[name="${focusName}"]`);input?.focus({preventScroll:true});if(selection!=null&&input?.setSelectionRange&&input.type!=='radio')input.setSelectionRange(selection,selection);}
 }
 
-function formatClock(seconds) {
-  const s = Math.max(0, Math.floor(seconds));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
-}
-
-function fullscreen(root, ctx) {
-  if (document.fullscreenElement) return document.exitFullscreen().catch(() => {});
-  if (!root.requestFullscreen) { ctx.toast('当前浏览器没有提供全屏功能。'); return; }
-  root.requestFullscreen().catch(() => ctx.toast('浏览器未能进入全屏。'));
-}
-
-export function renderLectureRoom(root, ctx, role) {
-  const lecture = ctx.state.lecture;
-  const teacher = role === 'teacher';
-  const { esc, icon } = ctx;
-  const button = (action, label, glyph, extra = '') =>
-    `<button type="button" data-lecture-action="${action}" class="plain-button" ${extra}>${icon(glyph, 17)}<span>${esc(label)}</span></button>`;
-
-  async function command(type, payload, current = ctx) {
-    try { return await current.command(type, payload); }
-    catch (error) { current.toast(error.message); return null; }
-  }
-
-  if (lecture.mode === 'experiment' && ctx.state.experiment) {
-    activeOutlineController = null;
-    const scope = ctx.state.code + '-' + role;
-    let experiment = experiments.get(root.firstElementChild);
-    if (!experiment || experiment.scope !== scope) {
-      root.innerHTML = `<section class="cx-live"><header class="lecture-backbar"><span data-experiment-anchor></span>` +
-        (teacher ? `<div class="lecture-bar-actions">${button('stage', '打开投影', 'monitor')}${button('invite', '邀请学生', 'users')}${button('resume', '返回讲义', 'arrow-left')}</div>` : '') +
-        `</header><div data-lecture-challenge></div></section>`;
-      experiment = {
-        scope,
-        holder: root.querySelector('[data-lecture-challenge]'),
-        anchor: root.querySelector('[data-experiment-anchor]'),
-      };
-      if (teacher) {
-        root.querySelector('[data-lecture-action="resume"]').onclick = () => command('lectureResume', undefined, experiment.ctx);
-        root.querySelector('[data-lecture-action="stage"]').onclick = () => experiment.ctx.open('stage');
-        root.querySelector('[data-lecture-action="invite"]').onclick = () => experiment.ctx.invite();
-      }
-      experiments.set(root.firstElementChild, experiment);
-    }
-    experiment.ctx = ctx;
-    const anchor = `${lecture.title} · 原稿第 ${lecture.pageNumber} 页`;
-    if (experiment.anchor.textContent !== anchor) experiment.anchor.textContent = anchor;
-    const challenge = ctx.state.experiment;
-    const resultKey = resultSteps.has(challenge.step) ? `${lecture.index}-${lecture.turn}-${challenge.step}` : null;
-    if (resultKey !== null && experiment.resultKey === resultKey) return;
-    renderChallenge(experiment.holder, challenge, {
-      role, turn: lecture.turn, action: payload => command('lectureExperimentAct', payload),
-      vote: choice => command('experimentVote', { choice }), askPeer: ctx.askPeer, report: ctx.toast,
-    });
-    experiment.resultKey = resultKey;
-    return;
-  }
-
-  if (lecture.mode === 'activity') {
-    activeOutlineController = null;
-    if (!teacher) return role === 'student' ? renderStudent(root, ctx) : renderStage(root, ctx);
-    if (!root.querySelector('[data-lecture-activity]')) {
-      root.innerHTML = `<div class="lecture-backbar">${button('resume', '返回讲义', 'arrow-left')}<span data-activity-anchor></span></div><div data-lecture-activity></div>`;
-    }
-    root.querySelector('[data-activity-anchor]').textContent = `原稿第 ${lecture.pageNumber} 页`;
-    root.querySelector('[data-lecture-action="resume"]').onclick = () => command('lectureResume');
-    return renderDesk(root.querySelector('[data-lecture-activity]'), ctx);
-  }
-
-  if (lecture.mode === 'ended') {
-    activeOutlineController = null;
-    root.innerHTML = `<section class="lecture-ended"><h1>本节课已结束</h1><p>${esc(lecture.title)}</p>` +
-      (teacher ? button('review', '查看课堂回顾', 'replay') + button('materials', '回到讲义备课', 'book') : '') +
-      `</section>`;
-    if (teacher) {
-      root.querySelector('[data-lecture-action="review"]').onclick = () => ctx.go('replay');
-      root.querySelector('[data-lecture-action="materials"]').onclick = () => ctx.go('materials');
-    }
-    return;
-  }
-
-  const scope = `${ctx.state.code}:${role}`;
-  let view = rooms.get(root);
-  if (!view || view.scope !== scope || view.shell !== root.firstElementChild) {
-    if (view?.timerInterval) clearInterval(view.timerInterval);
-    const defaultRailOpen = teacher && window.matchMedia('(min-width: 980px)').matches;
-    root.innerHTML = `<div class="lecture-room lecture-room--${role}${defaultRailOpen ? ' has-presenter-rail' : ''}">
-      <header class="lecture-room-bar">
-        <div class="lecture-bar-title">
-          <b data-lecture-title>${esc(lecture.title)}</b>
-          ${teacher
-            ? `<button type="button" class="lecture-page-pill" data-lecture-action="outline" aria-haspopup="dialog" aria-expanded="false" title="打开目录快速跳页（快捷键 G）">
-                ${icon('list', 15)}<span data-lecture-meta></span>${icon('chevron-down', 13)}
-              </button>`
-            : `<span class="lecture-page-meta" data-lecture-meta></span>`}
-        </div>
-        <div class="lecture-bar-actions">
-          ${teacher ? button('presenter', '讲台栏', 'layers', `aria-pressed="${defaultRailOpen}"`) : ''}
-          ${teacher && ctx.remotePair ? button('remote', '手机遥控', 'smartphone') : ''}
-          ${teacher ? button('stage', '打开投影', 'monitor') + button('invite', '邀请学生', 'users') : ''}
-          ${role === 'student' ? `<button type="button" class="plain-button lecture-pulse-btn" data-lecture-action="pulse" aria-pressed="false">${icon('help', 16)}<span>这页有疑问</span></button>` : ''}
-          ${role !== 'student' ? button('fullscreen', '全屏', 'maximize') : ''}
-        </div>
-      </header>
-      <div class="lecture-workspace">
-        <div class="lecture-stage-column">
-          <div data-lecture-frame class="lecture-frame-slot" aria-live="polite"><p role="status">正在载入授课页…</p></div>
-        </div>
-        ${teacher ? `<aside class="lecture-presenter-rail" data-presenter-rail${defaultRailOpen ? '' : ' hidden'} aria-label="教师讲台辅助栏">
-          <section class="presenter-card presenter-stats" aria-label="课堂实时状态">
-            <div><span>在线学生</span><strong data-presenter-students>0</strong></div>
-            <div><span>本页有疑问</span><strong data-presenter-pulses>0</strong></div>
-            <div class="presenter-clock-box">
-              <span>授课计时</span>
-              <strong data-presenter-clock>00:00</strong>
-              <div class="presenter-clock-controls">
-                <button type="button" data-presenter-clock-toggle aria-label="暂停或继续计时">暂停</button>
-                <button type="button" data-presenter-clock-reset aria-label="重置计时">重置</button>
-              </div>
-            </div>
-          </section>
-          <section class="presenter-card presenter-notes" aria-label="本页教师批注">
-            <header><h3>本页私有批注</h3><span data-note-status>仅教师可见</span></header>
-            <textarea data-presenter-note rows="5" placeholder="可在此记录本页讲解提示、过渡语或板书要点（仅自己可见）…"></textarea>
-            <div class="presenter-note-actions">
-              <button type="button" class="plain-button" data-presenter-note-save>保存批注</button>
-            </div>
-          </section>
-          <section class="presenter-card presenter-next" aria-label="下一页预览">
-            <header><h3>下一页预览</h3><span data-next-label></span></header>
-            <div class="presenter-next-body" data-presenter-next>正在预载…</div>
-          </section>
-        </aside>` : ''}
-      </div>
-      ${teacher ? `<footer class="lecture-pager">
-        ${button('previous', '上一页', 'arrow-left')}
-        ${button('next', '下一页', 'arrow-right')}
-        ${button('interact', '开启本页互动', 'users', 'hidden')}
-        ${button('experiment', '开启本页实验', 'target', 'hidden')}
-        ${button('finish', '结束授课', 'check')}
-      </footer>` : ''}
-      ${teacher ? `<div class="lecture-outline-backdrop" data-outline-backdrop hidden>
-        <section class="lecture-outline-drawer" role="dialog" aria-modal="true" aria-labelledby="lecture-outline-title">
-          <header class="lecture-outline-head">
-            <h2 id="lecture-outline-title">课件目录（共 ${lecture.total} 页）</h2>
-            <button type="button" class="icon-button" data-outline-close aria-label="关闭目录">${icon('close', 18)}</button>
-          </header>
-          <div class="lecture-outline-list" data-outline-list>正在加载目录…</div>
-        </section>
-      </div>` : ''}
-    </div>`;
-
-    view = {
-      scope,
-      shell: root.firstElementChild,
-      ctx,
-      renderedIndex: -1,
-      failedIndex: -1,
-      requestId: 0,
-      noteKey: '',
-      noteDirty: false,
-      railOpen: defaultRailOpen,
-      outlineOpen: false,
-      clockRunning: true,
-      clockElapsed: 0,
-      clockStartedAt: Date.now(),
-      holder: root.querySelector('[data-lecture-frame]'),
-      meta: root.querySelector('[data-lecture-meta]'),
-      prevBtn: root.querySelector('[data-lecture-action="previous"]'),
-      nextBtn: root.querySelector('[data-lecture-action="next"]'),
-      interactBtn: root.querySelector('[data-lecture-action="interact"]'),
-      experimentBtn: root.querySelector('[data-lecture-action="experiment"]'),
-      pulseBtn: root.querySelector('[data-lecture-action="pulse"]'),
-      rail: root.querySelector('[data-presenter-rail]'),
-      studentsEl: root.querySelector('[data-presenter-students]'),
-      pulsesEl: root.querySelector('[data-presenter-pulses]'),
-      clockEl: root.querySelector('[data-presenter-clock]'),
-      clockToggleBtn: root.querySelector('[data-presenter-clock-toggle]'),
-      noteArea: root.querySelector('[data-presenter-note]'),
-      noteStatus: root.querySelector('[data-note-status]'),
-      noteSaveBtn: root.querySelector('[data-presenter-note-save]'),
-      nextLabel: root.querySelector('[data-next-label]'),
-      nextBody: root.querySelector('[data-presenter-next]'),
-      outlineBackdrop: root.querySelector('[data-outline-backdrop]'),
-      outlineList: root.querySelector('[data-outline-list]'),
-      outlineTrigger: root.querySelector('[data-lecture-action="outline"]'),
-      presenterToggle: root.querySelector('[data-lecture-action="presenter"]'),
-    };
-    rooms.set(root, view);
-
-    const navigate = targetIndex => {
-      const current = view.ctx.state.lecture;
-      if (targetIndex >= 0 && targetIndex < current.total && targetIndex !== current.index) {
-        return command('lectureNavigate', { index: targetIndex }, view.ctx);
-      }
-    };
-
-    const setOutlineOpen = async open => {
-      if (!teacher || !view.outlineBackdrop) return;
-      view.outlineOpen = Boolean(open);
-      view.outlineBackdrop.hidden = !view.outlineOpen;
-      view.outlineTrigger?.setAttribute('aria-expanded', String(view.outlineOpen));
-      if (!view.outlineOpen) {
-        view.outlineTrigger?.focus?.({ preventScroll: true });
-        return;
-      }
-      renderOutline();
-      const closeBtn = view.outlineBackdrop.querySelector('[data-outline-close]');
-      closeBtn?.focus?.({ preventScroll: true });
-    };
-
-    const renderOutline = async () => {
-      if (!view.outlineList) return;
-      const code = view.ctx.state.code;
-      let items = outlineCache.get(code);
-      if (!items) {
-        view.outlineList.innerHTML = '<p class="lecture-outline-empty">正在读取课件目录…</p>';
-        try {
-          const raw = await view.ctx.getOutline();
-          items = Array.isArray(raw) ? raw : (raw?.items ?? []);
-          if (items.length) outlineCache.set(code, items);
-        } catch (error) {
-          view.outlineList.innerHTML = `<p class="lecture-outline-empty" role="alert">${esc(error.message)}</p>`;
-          return;
-        }
-      }
-      if (!view.outlineList.isConnected) return;
-      const current = view.ctx.state.lecture;
-      const pulses = view.ctx.state.pulseCounts ?? {};
-      view.outlineList.innerHTML = (items ?? []).map(item => {
-        const active = item.index === current.index;
-        const confused = pulses[item.pageNumber] ?? 0;
-        const expKind = item.experiment?.kind ?? item.experimentKind;
-        return `<button type="button" class="lecture-outline-item${active ? ' is-active' : ''}" data-outline-index="${item.index}" ${active ? 'aria-current="true"' : ''}>
-          <span class="outline-num">${item.index + 1}</span>
-          <span class="outline-main">
-            <strong>${esc(item.title)}</strong>
-            <small>原稿第 ${item.pageNumber} 页${item.supplemental ? ' · 补充讲解' : ''}</small>
-          </span>
-          <span class="outline-badges">
-            ${item.hasInteraction ? '<em class="badge-interact">互动</em>' : ''}
-            ${expKind ? `<em class="badge-exp">${esc(challengeNames[expKind] ?? '实验')}</em>` : ''}
-            ${confused > 0 ? `<em class="badge-pulse">${confused} 疑问</em>` : ''}
-          </span>
-        </button>`;
-      }).join('');
-    };
-
-    view.setOutlineOpen = setOutlineOpen;
-    view.renderOutline = renderOutline;
-
-    root.querySelector('[data-lecture-action="fullscreen"]')?.addEventListener('click', () => fullscreen(root, view.ctx));
-
-    if (role === 'student' && view.pulseBtn) {
-      view.pulseBtn.onclick = async () => {
-        const nextConfused = !view.ctx.state.myPulse;
-        view.pulseBtn.disabled = true;
-        try {
-          await command('lecturePulse', { confused: nextConfused }, view.ctx);
-        } finally {
-          if (view.pulseBtn.isConnected) view.pulseBtn.disabled = false;
-        }
-      };
-    }
-
-    if (teacher) {
-      view.prevBtn.onclick = () => navigate(view.ctx.state.lecture.index - 1);
-      view.nextBtn.onclick = () => navigate(view.ctx.state.lecture.index + 1);
-      root.querySelector('[data-lecture-action="stage"]').onclick = () => view.ctx.open('stage');
-      root.querySelector('[data-lecture-action="invite"]').onclick = () => view.ctx.invite();
-      root.querySelector('[data-lecture-action="remote"]')?.addEventListener('click', () => view.ctx.remotePair?.());
-      view.outlineTrigger.onclick = () => setOutlineOpen(!view.outlineOpen);
-      view.outlineBackdrop.querySelector('[data-outline-close]').onclick = () => setOutlineOpen(false);
-      view.outlineBackdrop.onclick = event => {
-        if (event.target === view.outlineBackdrop) void setOutlineOpen(false);
-      };
-      view.outlineList.onclick = event => {
-        const btn = event.target.closest('[data-outline-index]');
-        if (!btn) return;
-        const targetIndex = Number(btn.dataset.outlineIndex);
-        void setOutlineOpen(false);
-        void navigate(targetIndex);
-      };
-      view.presenterToggle.onclick = () => {
-        view.railOpen = !view.railOpen;
-        view.rail.hidden = !view.railOpen;
-        view.shell.classList.toggle('has-presenter-rail', view.railOpen);
-        view.presenterToggle.setAttribute('aria-pressed', String(view.railOpen));
-      };
-      view.interactBtn.onclick = () => {
-        const cur = view.ctx.state.lecture;
-        const closed = view.ctx.state.lectureArchive?.some(item => item.pageNumber === cur.pageNumber && item.phase === 'closed');
-        return closed ? view.ctx.go('replay') : command('lectureInteract', undefined, view.ctx);
-      };
-      view.experimentBtn.onclick = () => command('lectureExperimentStart', undefined, view.ctx);
-      root.querySelector('[data-lecture-action="finish"]').onclick = async () => {
-        const confirmed = await view.ctx.confirmDialog({
-          title: '结束本节讲义授课？',
-          message: '结束后学生端将停止接收作答，全部互动记录、实验与困惑页热点将自动保留在课堂回顾中。',
-          confirmLabel: '结束授课',
-          cancelLabel: '继续授课',
-        });
-        if (confirmed) await command('lectureFinish', undefined, view.ctx);
-      };
-
-      const paintClock = () => {
-        if (!view.clockEl?.isConnected) return;
-        const total = view.clockElapsed + (view.clockRunning ? (Date.now() - view.clockStartedAt) / 1000 : 0);
-        view.clockEl.textContent = formatClock(total);
-      };
-      view.timerInterval = setInterval(paintClock, 1000);
-      view.clockToggleBtn.onclick = () => {
-        if (view.clockRunning) {
-          view.clockElapsed += (Date.now() - view.clockStartedAt) / 1000;
-          view.clockRunning = false;
-          view.clockToggleBtn.textContent = '继续';
-        } else {
-          view.clockStartedAt = Date.now();
-          view.clockRunning = true;
-          view.clockToggleBtn.textContent = '暂停';
-        }
-        paintClock();
-      };
-      root.querySelector('[data-presenter-clock-reset]').onclick = () => {
-        view.clockElapsed = 0;
-        view.clockStartedAt = Date.now();
-        paintClock();
-      };
-
-      view.noteArea.addEventListener('input', () => {
-        view.noteDirty = true;
-        view.noteStatus.textContent = '未保存';
-      });
-      view.noteSaveBtn.onclick = async () => {
-        const cur = view.ctx.state.lecture;
-        if (!cur?.sourceVersion) return;
-        view.noteSaveBtn.disabled = true;
-        try {
-          await notebook.savePageNote(cur.sourceVersion, cur.pageNumber, {
-            id: 'annotation',
-            kind: 'annotation',
-            packet: { text: view.noteArea.value.trim() },
-            source: { type: 'presenter-rail' },
-          });
-          view.noteDirty = false;
-          view.noteStatus.textContent = '已保存';
-          view.ctx.toast('本页批注已保存');
-        } catch {
-          view.noteStatus.textContent = '本机未缓存原课件，仅会话内保留';
-        } finally {
-          if (view.noteSaveBtn.isConnected) view.noteSaveBtn.disabled = false;
-        }
-      };
-    }
-  }
-
-  view.ctx = ctx;
-  if (teacher) {
-    activeOutlineController = {
-      isOpen: () => Boolean(view.shell.isConnected && view.outlineOpen),
-      toggle: () => view.setOutlineOpen(!view.outlineOpen),
-      close: () => view.setOutlineOpen(false),
-    };
-  }
-
-  const metaText = `原稿第 ${lecture.pageNumber} 页${lecture.supplemental ? ' · 补充讲解' : ''}　${lecture.index + 1} / ${lecture.total}`;
-  if (view.meta.textContent !== metaText) view.meta.textContent = metaText;
-
-  if (role === 'student' && view.pulseBtn) {
-    const active = Boolean(ctx.state.myPulse);
-    view.pulseBtn.setAttribute('aria-pressed', String(active));
-    view.pulseBtn.classList.toggle('is-active', active);
-    view.pulseBtn.querySelector('span').textContent = active ? '已标记有疑问' : '这页有疑问';
-  }
-
-  if (teacher) {
-    view.prevBtn.disabled = lecture.index === 0;
-    view.nextBtn.disabled = lecture.index === lecture.total - 1;
-    view.interactBtn.hidden = !lecture.hasInteraction;
-    if (lecture.hasInteraction) {
-      const closed = ctx.state.lectureArchive?.some(item => item.pageNumber === lecture.pageNumber && item.phase === 'closed');
-      view.interactBtn.querySelector('span').textContent = closed ? '查看本页互动记录' : '开启本页互动';
-    }
-    const online = (ctx.state.participants ?? []).filter(p => !p.simulated).length;
-    view.studentsEl.textContent = String(online);
-    const pulseCount = ctx.state.pulseCounts?.[lecture.pageNumber] ?? 0;
-    view.pulsesEl.textContent = String(pulseCount);
-    view.pulsesEl.classList.toggle('has-pulses', pulseCount > 0);
-    if (view.outlineOpen) void view.renderOutline();
-
-    const noteKey = `${lecture.sourceVersion ?? ''}:${lecture.pageNumber}`;
-    if (view.noteKey !== noteKey) {
-      view.noteKey = noteKey;
-      view.noteDirty = false;
-      view.noteArea.value = '';
-      view.noteStatus.textContent = '仅教师可见';
-      if (lecture.sourceVersion) {
-        notebook.getPageNotes(lecture.sourceVersion, lecture.pageNumber).then(notes => {
-          if (view.noteKey !== noteKey || view.noteDirty || !view.noteArea.isConnected) return;
-          const privateNote = notes.find(item => item.kind === 'annotation');
-          const text = privateNote?.packet?.text ?? '';
-          view.noteArea.value = text;
-          view.noteStatus.textContent = text ? '来自备课本' : '仅教师可见';
-        }).catch(() => {});
-      }
-    }
-  }
-
-  if (view.renderedIndex !== lecture.index || view.failedIndex === lecture.index) {
-    const req = ++view.requestId;
-    const targetIndex = lecture.index;
-    view.holder.classList.add('is-loading');
-    loadFrameCached(ctx, ctx.state.code, targetIndex).then(frame => {
-      if (!view.holder.isConnected || view.requestId !== req) return;
-      view.renderedIndex = targetIndex;
-      view.failedIndex = -1;
-      view.holder.classList.remove('is-loading');
-      renderLectureFrame(view.holder, frame, { compact: role === 'student' });
-      if (teacher && view.experimentBtn) {
-        const kind = challengeForFrame(frame);
-        if (kind) {
-          view.experimentBtn.querySelector('span').textContent = challengeNames[kind] ?? '开启本页实验';
-          view.experimentBtn.hidden = false;
-        } else {
-          view.experimentBtn.hidden = true;
-        }
-      }
-    }).catch(error => {
-      if (!view.holder.isConnected || view.requestId !== req) return;
-      view.failedIndex = targetIndex;
-      view.holder.classList.remove('is-loading');
-      view.holder.innerHTML = `<p role="alert">${esc(error.message)}</p>${button('retry', '重新载入', 'replay')}`;
-      view.holder.querySelector('button').onclick = () => renderLectureRoom(root, view.ctx, role);
-    });
-
-    if (teacher && view.nextBody) {
-      const nextIndex = targetIndex + 1;
-      if (nextIndex >= lecture.total) {
-        view.nextLabel.textContent = '末页';
-        view.nextBody.innerHTML = '<p class="presenter-next-empty">已是本节课最后一页。</p>';
-      } else {
-        view.nextLabel.textContent = `第 ${nextIndex + 1} / ${lecture.total} 页`;
-        view.nextBody.innerHTML = '<p class="presenter-next-empty">正在预载下一页…</p>';
-        loadFrameCached(ctx, ctx.state.code, nextIndex).then(nextFrame => {
-          if (!view.nextBody.isConnected || view.requestId !== req) return;
-          const snippet = (nextFrame.body ?? []).slice(0, 2).join(' ').slice(0, 140);
-          view.nextBody.innerHTML = `
-            <div class="presenter-next-card">
-              <strong>${esc(nextFrame.title)}</strong>
-              ${nextFrame.preview ? `<img src="${esc(nextFrame.preview)}" alt="${esc('下一页预览：' + nextFrame.title)}" decoding="async">` : ''}
-              ${!nextFrame.preview && snippet ? `<p>${esc(snippet)}</p>` : ''}
-              ${nextFrame.hasInteraction ? '<span class="presenter-next-badge">含课堂互动</span>' : ''}
-            </div>`;
-        }).catch(() => {
-          if (view.nextBody.isConnected && view.requestId === req) {
-            view.nextBody.innerHTML = '<p class="presenter-next-empty">下一页将在翻页后载入。</p>';
-          }
-        });
-      }
-    }
-  }
-
-  return () => {
-    // Keep persistent shell & clock interval alive across incremental state updates; clean up if root unmounts.
-    if (!view.shell.isConnected && view.timerInterval) {
-      clearInterval(view.timerInterval);
-      view.timerInterval = null;
-    }
-  };
-}
-
-export function lectureKeyboard(event, ctx) {
-  const lecture = ctx.state.lecture;
-  if (lecture?.mode !== 'slides' || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey ||
-      document.querySelector('dialog[open]') || event.target?.closest?.('input,textarea,select,[contenteditable="true"]')) return;
-  if (event.key === 'Escape' && activeOutlineController?.isOpen()) {
-    event.preventDefault();
-    activeOutlineController.close();
-    return;
-  }
-  if ((event.key === 'g' || event.key === 'G') && activeOutlineController) {
-    event.preventDefault();
-    if (!event.repeat) activeOutlineController.toggle();
-    return;
-  }
-  if (activeOutlineController?.isOpen()) return;
-  if (event.key === ' ' && event.target?.closest?.('button,a,summary')) return;
-  const offsets = { ArrowRight: 1, PageDown: 1, ' ': 1, ArrowLeft: -1, PageUp: -1 };
-  if (!Object.hasOwn(offsets, event.key)) return;
-  event.preventDefault();
-  if (event.repeat) return;
-  const index = lecture.index + offsets[event.key];
-  if (index >= 0 && index < lecture.total) ctx.command('lectureNavigate', { index }).catch(error => ctx.toast(error.message));
+export function lectureKeyboard(event,ctx) {
+  const lecture=ctx.state.lecture;
+  if(!lecture||lecture.mode==='ended'||event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||document.querySelector('dialog[open]')||event.target?.closest?.('input,textarea,select,[contenteditable="true"]'))return;
+  if(event.key===' '&&event.target?.closest?.('button,a,summary'))return;
+  const offsets={ArrowRight:1,PageDown:1,' ':1,ArrowLeft:-1,PageUp:-1};if(!Object.hasOwn(offsets,event.key))return;
+  event.preventDefault();if(event.repeat)return;
+  const index=lecture.index+offsets[event.key];
+  if(index>=0&&index<lecture.total)ctx.command('lectureNavigate',{index}).catch(error=>ctx.toast(error.message));
 }

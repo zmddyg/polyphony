@@ -4,6 +4,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { isLegacyPpt, readLegacySlides } from '../dist/core/legacy-ppt.mjs';
 import { importMaterialFile, materialRenderingAvailable } from '../material-import.mjs';
+import { integrationUnavailable } from './support/integration.mjs';
 
 const legacyFixture = await readFile(new URL('./fixtures/material-import-basic.ppt', import.meta.url));
 const hiddenFixture = await readFile(new URL('./fixtures/material-import-hidden.pptx', import.meta.url));
@@ -98,7 +99,7 @@ test('extracts text and an original page preview from a real PDF, including page
     result = await importMaterialFile({ name: 'lesson.pdf', bytes });
   } catch (error) {
     if (error.status === 503) {
-      context.skip('Python with PyMuPDF is unavailable');
+      integrationUnavailable(context, 'Python with PyMuPDF is unavailable');
       return;
     }
     throw error;
@@ -117,7 +118,7 @@ test('extracts text and an original page preview from a real PDF, including page
 
 test('renders original .ppt and .pptx pages and retains hidden-slide positions', { timeout: 110_000 }, async context => {
   if (!await materialRenderingAvailable()) {
-    context.skip('LibreOffice, Python UNO and PyMuPDF are required');
+    integrationUnavailable(context, 'Presentation rendering requires LibreOffice with Python UNO or an authorized PowerPoint worker, plus PyMuPDF');
     return;
   }
   const [ppt, pptx] = await Promise.all([

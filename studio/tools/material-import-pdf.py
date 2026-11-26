@@ -56,8 +56,7 @@ def read_pdf(path, page_limit, text_limit, preview_limit):
             if preview is None:
                 missing_previews = True
             else:
-                mime, data = preview
-                entry["preview"] = f"data:{mime};base64," + base64.b64encode(data).decode("ascii")
+                entry["preview"] = "data:image/png;base64," + base64.b64encode(preview).decode("ascii")
             pages.append(entry)
 
     return {
@@ -73,35 +72,13 @@ def render_preview(pymupdf, page, budget):
     if not math.isfinite(dimension) or dimension <= 0:
         return None
     display_list = page.get_displaylist(annots=True)
-    # Try crisp lossless PNG at high resolution first (small vector slides stay razor-sharp).
-    for pixels in (1600, 1200):
+    for pixels in (1200, 900, 650, 420, 280, 200):
         scale = pixels / dimension
         matrix = pymupdf.Matrix(scale, scale)
         # A raster image does not preserve PDF links, form actions, or attachments.
-        pixmap = display_list.get_pixmap(matrix=matrix, colorspace=pymupdf.csRGB, alpha=False)
-        image = pixmap.tobytes("png")
+        image = display_list.get_pixmap(matrix=matrix, colorspace=pymupdf.csRGB, alpha=False).tobytes("png")
         if len(image) <= budget:
-            return ("image/png", image)
-        # For photo-heavy or 100-page decks, high-resolution JPEG stays legible without downscaling to 200px.
-        try:
-            jpeg = pixmap.tobytes("jpeg", jpg_quality=84)
-            if len(jpeg) <= budget:
-                return ("image/jpeg", jpeg)
-        except (RuntimeError, ValueError, TypeError):
-            pass
-    for pixels in (900, 650, 420, 280, 200):
-        scale = pixels / dimension
-        matrix = pymupdf.Matrix(scale, scale)
-        pixmap = display_list.get_pixmap(matrix=matrix, colorspace=pymupdf.csRGB, alpha=False)
-        try:
-            jpeg = pixmap.tobytes("jpeg", jpg_quality=82)
-            if len(jpeg) <= budget:
-                return ("image/jpeg", jpeg)
-        except (RuntimeError, ValueError, TypeError):
-            pass
-        image = pixmap.tobytes("png")
-        if len(image) <= budget:
-            return ("image/png", image)
+            return image
     return None
 
 

@@ -1,13 +1,16 @@
+import { runDeckHarness, generateNativeDeck } from './deck-harness.mjs';
+import { readSessionProvider, saveSessionProvider, sessionProviderSummary, testSessionProvider } from './provider-hub.mjs';
 import { createRoom } from './engine.mjs';
 import { applyRoomCommand, commandNeedsScore, createLectureRoom } from './lecture-room.mjs';
-import { lectureFrame, lectureOutline, validateLectureScore } from './lecture-score.mjs';
+import { lectureFrame, validateLectureScore } from './lecture-score.mjs';
 import { localLecturePlan, plannerPages } from './lecture-planner.mjs';
 import { publishedLecture } from './published-lecture-store.mjs';
 import { publicChallenge } from './challenge-lab.mjs';
+import { roundTallies, pairedRevisions } from './cognition.mjs';
 
 const KEY = 'polyphony.v1.';
 const CODE = /^[A-Z0-9]{6}$/;
-const STUDENT_COMMANDS = new Set(['join', 'respond', 'experimentVote', 'lecturePulse']);
+const STUDENT_COMMANDS = new Set(['join', 'respond', 'experimentVote']);
 export const isStudentCommand = type => STUDENT_COMMANDS.has(type);
 export const validRoomCode = code => CODE.test(code);
 
@@ -15,6 +18,7 @@ const answersPublished = room => ['reveal', 'branch', 'closed'].includes(room.ph
 export const isRoomResponsePublic = (response, room, published = answersPublished(room)) => published || response.round < room.round;
 
 export function projectRoom(room, role, participantId) {
+  if (role === 'stage') participantId = null;
   const statistics = { responseCount: 0, simulatedResponseCount: 0, samples: [] };
   for (const { round, sample, simulated } of room.responses) {
     if (round !== room.round) continue;
@@ -22,26 +26,13 @@ export function projectRoom(room, role, participantId) {
     if (simulated) statistics.simulatedResponseCount++;
     if (sample) statistics.samples.push({ phaseIndex: sample.phaseIndex, power: sample.power, simulated });
   }
-  const roundShift = room.round >= 2 && answersPublished(room) ? (() => {
-    const first = new Map();
-    for (const r of room.responses) if (r.round === 1 && r.participantId) first.set(r.participantId, r.optionId);
-    let paired = 0, changed = 0;
-    for (const r of room.responses) {
-      if (r.round === room.round && r.participantId && first.has(r.participantId)) {
-        paired++;
-        if (first.get(r.participantId) !== r.optionId) changed++;
-      }
-    }
-    return paired > 0 ? { paired, changed } : null;
-  })() : null;
-  const experiment = room.experiment ? { experiment: publicChallenge(room.experiment, participantId) } : {};
-  if (role === 'teacher') {
-    const pulseCounts = room.lecture
-      ? Object.fromEntries(Object.entries(room.lecturePulses ?? {}).map(([page, list]) => [page, list.length]))
-      : undefined;
-    return { ...room, ...statistics, ...experiment, ...(roundShift && { roundShift }), ...(pulseCounts !== undefined && { pulseCounts }) };
-  }
+  const experiment = room.experiment ? {experiment:publicChallenge(room.experiment, participantId)} : {};
+  if (role === 'teacher') return { ...room, ...statistics, ...experiment };
   const published = answersPublished(room);
+  // Model output and student prose can contain identity strings even after removing ID fields.
+  const privateTokens = [...room.participants.flatMap(p => [p.name, p.id]), ...room.responses.map(r => r.id)]
+    .filter(Boolean).sort((a, b) => b.length - a.length);
+  const anonymousText = value => privateTokens.reduce((text, token) => text.split(token).join('〔匿名〕'), String(value ?? ''));
   const responses = [];
   for (const response of room.responses) {
     if (response.participantId === participantId) responses.push(response);
@@ -52,32 +43,37 @@ export function projectRoom(room, role, participantId) {
   }
   const participants = room.participants.map((participant, index) => participant.id === participantId
     ? participant : { id: `anonymous-${index + 1}`, name: '', simulated: participant.simulated });
-  const events = (room.events ?? []).map(({ id, type, label, at }) => ({ id, type, label, at }));
-  const { customLessons, lectureArchive, experimentArchive, lecturePulses, decision, analysis, winner, winnerVisible, spotlight, ...state } = room;
+  const events = (room.events ?? []).map(({ id, type, label, at }) => ({ id, type, label: anonymousText(label), at }));
+  const { customLessons, lectureArchive, decision, analysis, firstRoundAnalysis, winner, ...state } = room;
+  // Only completed takeaways cross to public streams, never private archived answers.
+  state.lectureTakeaways=(lectureArchive??[]).filter(s=>s.phase==='closed').map(s=>({pageNumber:s.pageNumber,title:s.lesson.title,...(s.lesson.takeaway??s.lesson.moduleConfig?.takeaway??{})}));
   if (room.lecture) {
     const { sourceVersion, ...visibleLecture } = room.lecture;
     state.lecture = visibleLecture;
+    if(role==='stage')state.lecture.filmstrip=room.lecture.filmstrip?.map(({pageNumber,activityId})=>({pageNumber,activityId}));
+    else delete state.lecture.filmstrip;
   }
+  state.lesson = structuredClone(room.lesson);
+  if (!published) {
+    delete state.lesson.correctOptionId;
+    if (state.lesson.moduleConfig) { delete state.lesson.moduleConfig.faultStepId; delete state.lesson.moduleConfig.faultDiagnosis; }
+  }
+  if (role==='student' && state.lesson.moduleConfig?.aiPeer && !room.aiPeerRevealed) delete state.lesson.moduleConfig.aiPeer;
   const visibleAnalysis = published && analysis ? {
-    headline: analysis.headline, summary: analysis.summary, branches: analysis.branches,
+    headline: anonymousText(analysis.headline), summary: anonymousText(analysis.summary),
+    branches: (analysis.branches ?? []).map(b => ({ id: b.id, title: anonymousText(b.title), description: anonymousText(b.description) })),
+    contrastPair: (analysis.contrastPair ?? []).slice(0, 2).map(p => ({
+      sideLabel: anonymousText(p.sideLabel), tone: p.tone === 'alert' ? 'alert' : 'insight', quote: anonymousText(p.quote),
+    })),
     recommendedId: analysis.recommendedId, source: analysis.source, evidence: [],
   } : null;
   const winnerIndex = room.participants.findIndex(({ id }) => id === winner?.id);
-  const visibleSpotlight = published && Array.isArray(spotlight) ? spotlight : [];
-  const winnerDisplay = winnerVisible && winner
-    ? { name: winner.name, simulated: Boolean(winner.simulated), eligibleCount: winner.eligibleCount }
-    : undefined;
-  const myPulse = room.lecture
-    ? Boolean(participantId != null && lecturePulses?.[String(room.lecture.pageNumber)]?.includes(participantId))
-    : undefined;
   return {
     ...state, ...statistics, ...experiment, participants, responses, events, analysis: visibleAnalysis,
-    spotlight: visibleSpotlight,
-    ...(roundShift && { roundShift }),
-    decision: decision ? { branchId: decision.branchId, title: decision.title } : null,
+    ...(published&&room.round===2&&firstRoundAnalysis?{firstRoundContrastPair:(firstRoundAnalysis.contrastPair??[]).slice(0,2).map(p=>({sideLabel:anonymousText(p.sideLabel),tone:p.tone==='alert'?'alert':'insight',quote:anonymousText(p.quote)}))}:{}),
+    ...(published ? { round1Tallies: roundTallies(room, 1), pairedRevisions: pairedRevisions(room) } : {}),
+    decision: decision ? { branchId: decision.branchId, title: anonymousText(decision.title) } : null,
     winner: winnerIndex >= 0 ? participants[winnerIndex] : null,
-    ...(winnerDisplay && { winnerDisplay }),
-    ...(myPulse !== undefined && { myPulse }),
   };
 }
 
@@ -86,47 +82,40 @@ function browserId() {
   return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function link(view, code, origin, extra = {}) {
+function link(view, code, origin) {
   const url = new URL(location.href);
   url.search = '';
   url.hash = '';
   url.searchParams.set('view', view);
   url.searchParams.set('room', code);
-  for (const [k, v] of Object.entries(extra)) {
-    if (v != null && v !== '') url.searchParams.set(k, v);
-  }
   if (origin) return new URL(url.pathname + url.search, origin).href;
   return url.href;
 }
 
 const API = path => new URL(`./api/${path}`, location.href);
 
-function statusMessage(status) {
-  if (status === 413) return '上传内容过大，请压缩图片或拆分文件后重试。';
-  if (status === 429) return '请求过于频繁，请稍候片刻再试。';
-  if (status === 502 || status === 503 || status === 504) return '课堂服务暂时不可达或响应超时，请稍后重试。';
-  return `请求失败（HTTP ${status}）。`;
+function passphraseHeader(passphrase) {
+  if (!passphrase) return {};
+  const bytes = new TextEncoder().encode(passphrase);
+  const encoded = btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join(''));
+  return { 'X-Polyphony-Passphrase': 'base64:' + encoded };
 }
 
-async function readJsonResponse(response) {
-  const text = await response.text();
-  let data = null;
-  if (text) {
-    try { data = JSON.parse(text); } catch { /* Proxy or gateway may return an HTML error page. */ }
-  }
-  if (!response.ok) throw new Error(data?.error ?? statusMessage(response.status));
-  if (data === null) throw new Error('课堂服务返回了无法解析的响应，请重试。');
+async function responseData(response, fallback = `请求失败（${response.status}）。`) {
+  const data = await response.json().catch(() => null);
+  if (!response.ok) throw Object.assign(new Error(data?.error ?? fallback), { code: data?.code });
+  if (data == null) throw new Error('课堂服务返回了无法读取的响应。');
   return data;
 }
 
-async function api(path, body, extraHeaders = {}) {
-  const request = body == null ? { headers: extraHeaders } : {
+async function api(path, body, headers = {}) {
+  const request = body == null ? {} : {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...extraHeaders },
+    headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify(body),
   };
   const response = await fetch(API(path), { ...request, cache: 'no-store' });
-  return readJsonResponse(response);
+  return responseData(response);
 }
 
 function createSubscription(initialState, project = state => state) {
@@ -149,12 +138,10 @@ function createSubscription(initialState, project = state => state) {
 }
 
 async function openServer({ role, room, demo, lessonId, lecture, claim, passphrase }, status) {
-  const headers = passphrase ? { 'X-Polyphony-Passphrase': passphrase } : {};
-  const initial = room
-    ? (role === 'teacher' && claim
-      ? await api(`rooms/${room}/claim-teacher`, { token: claim })
-      : await api(`rooms/${room}/session`, { role }))
-    : await api('rooms', { demo, lessonId, lecture }, headers);
+  let initial;
+  if (claim) initial = await api(`rooms/${room}/claim-teacher`, { token: claim });
+  else if (room) initial = await api(`rooms/${room}/session`, { role });
+  else initial = await api('rooms', { demo, lessonId, lecture }, passphraseHeader(passphrase));
   const { room: state, participantId } = initial;
   const { code } = state;
   const sessions = createSubscription(state);
@@ -178,13 +165,13 @@ async function openServer({ role, room, demo, lessonId, lecture, claim, passphra
     get connected() { return connected; },
     code,
     mode: 'server',
+    passphraseRequired: Boolean(status.passphraseRequired),
     materialRendering: Boolean(status.materialRendering),
     lecturePlanProvider: status.lecturePlanProvider ?? (status.assistedComposition ? 'chat' : 'local'),
     participantId,
     assistedAnalysis: Boolean(status.assistedAnalysis),
     assistedComposition: Boolean(status.assistedComposition),
     aiOutputMode: status.aiOutputMode ?? null,
-    passphraseRequired: Boolean(status.passphraseRequired),
     subscribe: sessions.subscribe,
     subscribeStatus(fn) { statusListeners.add(fn); return () => statusListeners.delete(fn); },
     async command(type, payload = {}) {
@@ -192,41 +179,67 @@ async function openServer({ role, room, demo, lessonId, lecture, claim, passphra
       sessions.update(result.room);
       return sessions.state;
     },
+    get providerSummary() { return status.providerSummary ?? {configured:false,source:'none'}; },
+    async authorDeck(spec,options={}) {
+      if(role!=='teacher')throw Error('仅教师可以生成课件。');
+      let stopped=false,timer;
+      const poll=async()=>{if(stopped)return;try{const progress=await api(`rooms/${code}/harness`);if(!stopped&&progress.harnessReceipt)options.onStage?.(progress.harnessReceipt);}catch{/* Final response owns errors. */}finally{if(!stopped)timer=setTimeout(poll,300);}};
+      if(options.onStage)timer=setTimeout(poll,120);
+      try{return await api(`rooms/${code}/author-deck`,{spec,pacingMode:options.pacingMode});}finally{stopped=true;clearTimeout(timer);}
+    },
+    async configureProvider(input) {
+      if (role !== 'teacher') throw Error('仅教师可以配置模型。');
+      const result = await api(`rooms/${code}/provider`,input);
+      status.providerSummary=result.providerSummary;
+      return result;
+    },
+    async runHarness(material, options={}) {
+      if (role !== 'teacher') throw Error('仅教师可以运行 Harness。');
+      let stopped=false,timer;
+      const poll=async()=>{
+        if(stopped)return;
+        try {const progress=await api(`rooms/${code}/harness`);if(!stopped&&progress.harnessReceipt)options.onStage?.(progress.harnessReceipt);}catch{/* Final POST response owns error reporting. */}
+        finally{if(!stopped)timer=setTimeout(poll,250);}
+      };
+      if(options.onStage)timer=setTimeout(poll,100);
+      try{return await api(`rooms/${code}/harness`,{material,pacingMode:options.pacingMode,mode:options.mode});}
+      finally{stopped=true;clearTimeout(timer);}
+    },
     compose(input) {
       if (role !== 'teacher') return Promise.reject(new Error('Only the teacher can compose a lesson.'));
       return api(`rooms/${code}/compose`, input);
     },
     async askPeer(index, turn) {
-      if (role !== 'teacher') throw new Error('请由教师邀请 AI 同桌。');
-      const result = await api(`rooms/${code}/experiment-peer`, { index, turn });
+      if (role !== 'teacher') throw new Error('请由教师邀请 AI 辩友。');
+      const result = await api(`rooms/${code}/experiment-peer`, {index,turn});
       sessions.update(result.room);
     },
-    async importMaterial(file) {
-      const url = API(`rooms/${code}/materials/import`);
-      url.searchParams.set('name', file.name);
-      const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file });
-      return readJsonResponse(response);
+    async importMaterial(file, credential = passphrase) {
+      const url=API(`rooms/${code}/materials/import`);
+      url.searchParams.set('name',file.name);
+      const response=await fetch(url,{
+        method:'POST', headers:{'Content-Type':'application/octet-stream', ...passphraseHeader(credential)}, body:file,
+      });
+      return responseData(response,'课件解析失败。');
     },
     async planLecture(material) {
-      const pages = plannerPages(material);
+      const pages=plannerPages(material);
       if (!(status.assistedLecturePlanning ?? status.assistedComposition)) return localLecturePlan(pages);
-      try { return await api(`rooms/${code}/lecture-plan`, { pages }); }
+      try { return await api(`rooms/${code}/lecture-plan`,{pages}); }
       catch { return localLecturePlan(pages); }
     },
     getFrame(index) { return api(`rooms/${code}/frame?index=${index}`); },
-    async getOutline() {
-      const data = await api(`rooms/${code}/outline`);
-      return Array.isArray(data) ? data : (data?.items ?? []);
-    },
     async createRemotePair() {
-      if (role !== 'teacher') throw new Error('仅教师可生成遥控配对码。');
+      if (role !== 'teacher') throw new Error('仅教师可以创建手机遥控配对。');
       const pair = await api(`rooms/${code}/remote-pair`, {});
-      return { ...pair, url: link('desk', code, status.publicOrigin || null, { claim: pair.token }) };
+      const url = new URL(link('remote', code, status.publicOrigin));
+      url.hash = new URLSearchParams({ claim: pair.token }).toString();
+      return { url: url.href, expiresAt: pair.expiresAt };
     },
     newRoom(options = {}) { return openServer({ passphrase, ...options, role: 'teacher' }, status); },
-    url(view, extra) {
-      const publicView = view === 'student' || view === 'stage' || Boolean(extra?.claim);
-      return link(view, code, publicView && status.publicOrigin ? status.publicOrigin : null, extra);
+    url(view) {
+      const publicView = view === 'student' || view === 'stage';
+      return link(view, code, publicView && status.publicOrigin ? status.publicOrigin : null);
     },
     close() { stream.close(); statusListeners.clear(); connected = false; sessions.clear(); },
   };
@@ -239,14 +252,14 @@ async function localRoom({ role, room, demo, lessonId, lecture }) {
     do { code = browserId().slice(0, 6).toUpperCase(); }
     while (localStorage.getItem(KEY + code));
     savedScore = lecture ? validateLectureScore(lecture) : undefined;
-    const state = savedScore ? createLectureRoom(code, savedScore) : createRoom({ code, demo, lessonId, at: Date.now() });
-    if (savedScore) await publishedLecture('add', code, savedScore);
+    const state = savedScore ? createLectureRoom(code,savedScore) : createRoom({ code, demo, lessonId, at: Date.now() });
+    if (savedScore) await publishedLecture('add',code,savedScore);
     try {
       localStorage.setItem(`${KEY}${code}.teacher`, '1');
       localStorage.setItem(KEY + code, JSON.stringify(state));
     } catch (error) {
       localStorage.removeItem(`${KEY}${code}.teacher`);
-      if (savedScore) await publishedLecture('delete', code);
+      if (savedScore) await publishedLecture('delete',code);
       throw error;
     }
   }
@@ -266,7 +279,7 @@ async function localRoom({ role, room, demo, lessonId, lecture }) {
   }
   const project = state => projectRoom(state, role, participantId);
   async function getScore() {
-    savedScore ??= await publishedLecture('get', code);
+    savedScore ??= await publishedLecture('get',code);
     if (!savedScore) throw new Error('浏览器中找不到这节课的讲义，请回到备课页重新开课。');
     return savedScore;
   }
@@ -305,9 +318,7 @@ async function localRoom({ role, room, demo, lessonId, lecture }) {
         const command = { type, payload: role === 'student' ? { ...payload, participantId } : { ...payload } };
         if (type === 'analyze') delete command.payload.analysis;
         command.payload.at = Date.now();
-        if (type === 'draw' || type === 'lectureExperimentStart' || (type === 'lectureExperimentAct' && payload.action === 'reset')) {
-          command.payload.random = crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32;
-        }
+        if (type === 'draw') command.payload.random = crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32;
         const value = localStorage.getItem(roomKey);
         const current = JSON.parse(value);
         const next = applyRoomCommand(current, command, score);
@@ -324,39 +335,59 @@ async function localRoom({ role, room, demo, lessonId, lecture }) {
       };
       return navigator.locks ? navigator.locks.request(roomKey, write) : write();
     },
+    get providerSummary() { return sessionProviderSummary(); },
+    authorDeck(spec,options={}) { if(role!=='teacher')return Promise.reject(Error('仅教师可以生成课件。'));return generateNativeDeck(spec,{...options,provider:readSessionProvider()}); },
+    async configureProvider(input) {
+      if (role !== 'teacher') throw Error('仅教师可以配置模型。');
+      if (input.test) await testSessionProvider(input);
+      return {providerSummary:input.testOnly?sessionProviderSummary():saveSessionProvider(input),tested:!!input.test};
+    },
+    async runHarness(material, options={}) {
+      if (role !== 'teacher') throw Error('仅教师可以运行 Harness。');
+      return runDeckHarness(material,{...options,provider:readSessionProvider()});
+    },
     async compose() { throw new Error('Assisted composition requires the classroom server.'); },
+    async askPeer(index, turn) {
+      if (role !== 'teacher') throw new Error('请由教师邀请 AI 辩友。');
+      return this.command('lectureExperimentAct', { action: 'peer', expectedLectureIndex: index, expectedLectureTurn: turn });
+    },
     async importMaterial() { throw new Error('此转换需要在本机课堂服务中打开共演。'); },
     async planLecture(material) { return localLecturePlan(plannerPages(material)); },
     async getFrame(index) {
-      if (!initial.lecture || (role !== 'teacher' && read().lecture.index !== index)) throw new Error('授课页已切换。');
-      const frame = lectureFrame(await getScore(), index);
-      if (!frame || (role !== 'teacher' && read().lecture.index !== index)) throw new Error('授课页已切换。');
+      if (!initial.lecture || read().lecture.index !== index) throw new Error('授课页已切换。');
+      const frame=lectureFrame(await getScore(),index);
+      if (!frame || read().lecture.index !== index) throw new Error('授课页已切换。');
       return frame;
     },
-    async getOutline() {
-      if (role !== 'teacher' || !initial.lecture) throw new Error('仅教师端可查看讲义目录。');
-      return lectureOutline(await getScore());
-    },
-    async createRemotePair() { throw new Error('跨设备教师遥控需要在联机课堂服务中使用。'); },
     async newRoom(options = {}) { return localRoom({ ...options, role: 'teacher' }); },
-    url(view, extra) { return link(view, code, null, extra); },
+    url(view) { return link(view, code); },
     close() { channel?.close(); removeEventListener('storage', onStorage); sessions.clear(); },
   };
 }
 
-export async function openSession({ role, room, demo = true, lessonId, claim, passphrase } = {}) {
+export async function openSession({ role, room, demo = true, lessonId = 'four-spaces', claim, passphrase, remote = false } = {}) {
   if (!['teacher', 'student', 'stage'].includes(role)) throw new Error('Unknown room view.');
   room = room?.trim().toUpperCase() || null;
   if (room && !validRoomCode(room)) throw new Error('Enter a valid six-character room code.');
   if (!room && role !== 'teacher') throw new Error('Enter a room code or open the classroom link.');
+  if ((remote || claim) && (!room || role !== 'teacher' || (claim && !/^[a-f0-9]{32}$/i.test(claim)))) {
+    throw new Error('手机遥控链接无效，请扫描教师台生成的二维码。');
+  }
   const options = { role, room, demo, lessonId, claim, passphrase };
-  if (location.protocol === 'file:') return localRoom(options);
+  const remoteUnavailable = '手机遥控需要连接课堂服务，请检查网络后重新扫码。';
+  if (location.protocol === 'file:') {
+    if (remote || claim) throw new Error(remoteUnavailable);
+    return localRoom(options);
+  }
   let status;
   try { status = await api('status'); } catch { /* Static hosting has no room API. */ }
   if (status?.polyphony) {
-    sessionStorage.setItem(`${KEY}server`, '1');
+    try { sessionStorage.setItem(`${KEY}server`, '1'); } catch { /* The server supports restricted storage contexts. */ }
     return openServer(options, status);
   }
-  if (sessionStorage.getItem(`${KEY}server`)) throw new Error('The classroom server is unavailable. Reconnect and reopen this link.');
+  if (remote || claim) throw new Error(remoteUnavailable);
+  let usedServer;
+  try { usedServer = sessionStorage.getItem(`${KEY}server`); } catch { /* Treat a static host as local. */ }
+  if (usedServer) throw new Error('The classroom server is unavailable. Reconnect and reopen this link.');
   return localRoom(options);
 }
