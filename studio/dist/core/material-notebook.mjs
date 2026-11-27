@@ -1,5 +1,5 @@
 const defaultDatabase = 'polyphony-material-notebook';
-const publicKinds = new Set(['handout', 'science', 'classroom', 'experiment']);
+const publicKinds = new Set(['handout', 'science', 'classroom']);
 const noteKinds = new Set([...publicKinds, 'annotation']);
 const lessonStartTypes = new Set(['room', 'loadLesson', 'switchLesson']);
 
@@ -17,7 +17,7 @@ const sha256Constants = new Uint32Array([
 const rotate = (value, bits) => (value >>> bits) | (value << (32 - bits));
 
 // Web Crypto is unavailable when the classroom server is opened over HTTP on a LAN.
-function sha256WithoutWebCrypto(bytes) {
+export function sha256WithoutWebCrypto(bytes) {
   const hash = new Uint32Array([
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
     0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
@@ -306,7 +306,17 @@ export function createMaterialNotebook({ indexedDB, databaseName = defaultDataba
   }
 
   return {
+    async deleteVersion(versionId) {
+      checkVersionId(versionId);
+      return run(['versions', 'documents', 'notes', 'classrooms'], 'readwrite', async stores => {
+        const keys = await Promise.all(['notes','classrooms'].map(async name => [name, await readRequest(stores[name].getAll())]));
+        await Promise.all([readRequest(stores.versions.delete(versionId)),readRequest(stores.documents.delete(versionId)),
+          ...keys.flatMap(([name,records])=>records.filter(r=>r.versionId===versionId).map(r=>readRequest(stores[name].delete(name==='notes'?[versionId,r.pageNumber,r.id]:[versionId,r.pageNumber]))))]);
+      });
+    },
     async saveVersion(input) {
+      input = structuredClone(input);
+      if(input.draft) input.draft.speakerNotes = Object.fromEntries(input.pages.map(p=>[p.number,p.speakerNotes ?? input.draft.speakerNotes?.[p.number] ?? '']));
       const { versionId, pages, name = input.title, title = name, type = input.kind, file = null, warnings = [] } = input;
       checkVersionId(versionId);
       if (!Array.isArray(pages) || !pages.length || typeof name !== 'string' || !name.trim()) {
@@ -321,6 +331,11 @@ export function createMaterialNotebook({ indexedDB, databaseName = defaultDataba
         if (existing) {
           const document = await readRequest(documents.get(versionId));
           if (!document) throw new Error('已保存的课件无法打开。');
+          if (Object.hasOwn(input, 'draft')) {
+            document.draft = input.draft;
+            document.pages = document.pages.map(p=>({...p,speakerNotes:input.draft?.speakerNotes?.[p.number] ?? p.speakerNotes ?? ''}));
+            await readRequest(documents.put(document));
+          }
           const version = { ...existing, openedAt };
           await readRequest(versions.put(version));
           return { ...document, ...version };
@@ -345,7 +360,7 @@ export function createMaterialNotebook({ indexedDB, databaseName = defaultDataba
         const [version, document] = await Promise.all([
           readRequest(versions.get(versionId)), readRequest(documents.get(versionId)),
         ]);
-        return version && document ? { ...document, ...version } : null;
+        return version && document ? { ...document, ...version, pages:document.pages.map(p=>({...p,speakerNotes:document.draft?.speakerNotes?.[p.number] ?? p.speakerNotes ?? ''})) } : null;
       });
     },
     async setLastPage(versionId, pageNumber) {
@@ -430,156 +445,6 @@ export function createMaterialNotebook({ indexedDB, databaseName = defaultDataba
           packet: { reason, optionLabel }, source, updatedAt: now(), adoption: null,
         }));
         return evidence;
-      });
-    },
-    async updateDocumentPages(versionId, pages, warnings) {
-      checkVersionId(versionId);
-      if (!Array.isArray(pages) || !pages.length) throw new Error('原课件页数据无效。');
-      const incoming = new Map();
-      for (const page of pages) {
-        checkPageNumber(page?.number);
-        incoming.set(page.number, page);
-      }
-      return run(['versions', 'documents'], 'readwrite', async ({ versions, documents }) => {
-        const [version, document] = await Promise.all([
-          readRequest(versions.get(versionId)), readRequest(documents.get(versionId)),
-        ]);
-        if (!version || !document) throw new Error('已保存的课件无法打开。');
-        const mergedPages = (document.pages ?? []).map(existing => {
-          const updated = incoming.get(existing.number);
-          if (!updated) return existing;
-          return {
-            ...existing,
-            ...(updated.preview ? { preview: updated.preview } : {}),
-            ...(updated.text && !existing.text ? { text: updated.text } : {}),
-            ...(updated.speakerNotes && !existing.speakerNotes ? { speakerNotes: updated.speakerNotes } : {}),
-            ...(updated.formulas?.length && !existing.formulas?.length ? { formulas: updated.formulas } : {}),
-            ...(updated.images?.length && !existing.images?.length ? { images: updated.images } : {}),
-          };
-        });
-        const nextDocument = {
-          ...document,
-          pages: mergedPages,
-          ...(Array.isArray(warnings) ? { warnings } : {}),
-        };
-        const nextVersion = { ...version, openedAt: now() };
-        await Promise.all([readRequest(documents.put(nextDocument)), readRequest(versions.put(nextVersion))]);
-        return { ...nextDocument, ...nextVersion };
-      });
-    },
-    async deleteVersion(versionId) {
-      checkVersionId(versionId);
-      return run(['versions', 'documents', 'notes', 'classrooms'], 'readwrite', async ({ versions, documents, notes, classrooms }) => {
-        const [savedNotes, savedClassrooms] = await Promise.all([
-          readRequest(notes.index('version').getAll(versionId)),
-          readRequest(classrooms.getAll()),
-        ]);
-        await Promise.all([
-          readRequest(versions.delete(versionId)),
-          readRequest(documents.delete(versionId)),
-          ...savedNotes.map(note => readRequest(notes.delete([note.versionId, note.pageNumber, note.id]))),
-          ...savedClassrooms
-            .filter(item => item?.versionId === versionId)
-            .map(item => readRequest(classrooms.delete([item.versionId, item.pageNumber]))),
-        ]);
-        return { versionId, deletedNotes: savedNotes.length };
-      });
-    },
-    async exportNotebook(versionId) {
-      checkVersionId(versionId);
-      return run(['versions', 'documents', 'notes', 'classrooms'], 'readonly', async ({ versions, documents, notes, classrooms }) => {
-        const [version, document, savedNotes, savedClassrooms] = await Promise.all([
-          readRequest(versions.get(versionId)),
-          readRequest(documents.get(versionId)),
-          readRequest(notes.index('version').getAll(versionId)),
-          readRequest(classrooms.getAll()),
-        ]);
-        if (!version || !document) throw new Error('找不到要导出的备课本。');
-        const { file: _omitFile, ...portableDocument } = document;
-        return {
-          format: 'polyphony.notebook',
-          version: 1,
-          exportedAt: now(),
-          versionMeta: version,
-          document: { ...portableDocument, file: null },
-          notes: savedNotes.sort(compareNotes),
-          classrooms: savedClassrooms.filter(item => item?.versionId === versionId),
-        };
-      });
-    },
-    async importNotebook(bundle) {
-      if (!bundle || typeof bundle !== 'object' || bundle.format !== 'polyphony.notebook' || bundle.version !== 1) {
-        throw new Error('备课包格式不受支持。请选择由共演导出的 .polyphony-notebook.json 文件。');
-      }
-      const meta = bundle.versionMeta;
-      const doc = bundle.document;
-      const versionId = meta?.versionId ?? doc?.versionId;
-      checkVersionId(versionId);
-      const pages = doc?.pages;
-      if (!Array.isArray(pages) || !pages.length) throw new Error('备课包缺少有效的原课件页。');
-      const pageNumbers = pages.map(page => page?.number);
-      pageNumbers.forEach(checkPageNumber);
-      if (new Set(pageNumbers).size !== pageNumbers.length) throw new Error('备课包中的原课件页码重复。');
-      const pageSet = new Set(pageNumbers);
-      const name = String(meta?.name ?? doc?.name ?? doc?.title ?? '导入的备课本').trim() || '导入的备课本';
-      const title = String(meta?.title ?? doc?.title ?? name).trim() || name;
-      const type = String(meta?.type ?? doc?.type ?? 'text');
-      const rawNotes = Array.isArray(bundle.notes) ? bundle.notes : [];
-      const validNotes = [];
-      for (const note of rawNotes) {
-        if (!note || typeof note !== 'object') continue;
-        if (!pageSet.has(note.pageNumber)) continue;
-        checkNoteId(note.id);
-        if (!noteKinds.has(note.kind) && note.kind !== 'classroom-reason') continue;
-        if (note.packet == null) continue;
-        validNotes.push({
-          ...note,
-          versionId,
-          updatedAt: Number.isFinite(note.updatedAt) ? note.updatedAt : now(),
-        });
-      }
-      const rawClassrooms = Array.isArray(bundle.classrooms) ? bundle.classrooms : [];
-      const validClassrooms = rawClassrooms.filter(item => item && typeof item === 'object' && pageSet.has(item.pageNumber))
-        .map(item => ({ ...item, versionId }));
-      return run(['versions', 'documents', 'notes', 'classrooms'], 'readwrite', async ({ versions, documents, notes, classrooms }) => {
-        const openedAt = now();
-        const [existingVersion, existingDocument] = await Promise.all([
-          readRequest(versions.get(versionId)), readRequest(documents.get(versionId)),
-        ]);
-        const nextVersion = {
-          versionId,
-          name,
-          title,
-          type,
-          pageNumbers,
-          pageCount: pages.length,
-          lastPage: pageSet.has(meta?.lastPage) ? meta.lastPage : pageNumbers[0],
-          createdAt: existingVersion?.createdAt ?? (Number.isFinite(meta?.createdAt) ? meta.createdAt : openedAt),
-          openedAt,
-        };
-        const nextDocument = {
-          ...doc,
-          versionId,
-          name,
-          title,
-          type,
-          pages,
-          file: existingDocument?.file ?? null,
-          warnings: Array.isArray(doc?.warnings) ? doc.warnings : [],
-        };
-        await Promise.all([
-          readRequest(versions.put(nextVersion)),
-          readRequest(documents.put(nextDocument)),
-          ...validNotes.map(note => readRequest(notes.put(note))),
-          ...validClassrooms.map(item => readRequest(classrooms.put(item))),
-        ]);
-        return {
-          versionId,
-          name,
-          pageCount: pages.length,
-          noteCount: validNotes.length,
-          classroomCount: validClassrooms.length,
-        };
       });
     },
   };

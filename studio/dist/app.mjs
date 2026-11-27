@@ -1,25 +1,28 @@
 import { openSession } from './core/transport.mjs';
-import { lessons, getLesson } from './core/catalog.mjs';
-import { activities, getActivity } from './core/activities.mjs';
+import { getLesson, WORKSPACE_LESSON_ID } from './core/catalog.mjs';
 import { exportScore, importScore } from './core/score-package.mjs';
 import { icon, esc, viewStyles } from './ui.mjs';
 
 const app = document.querySelector('#app');
 const overlays = document.querySelector('#overlays');
 const liveMessage = document.querySelector('#toast');
-const titles = {materials:'讲义备课',desk:'课堂控制台',workshop:'AI 备课',lab:'学科实验',replay:'课堂回顾',system:'系统架构',student:'学生端',stage:'投影大屏'};
-const teacherViews = ['materials','desk','workshop','lab','replay','system'];
-const query = new URL(location.href).searchParams;
-let view = Object.hasOwn(titles,query.get('view')) ? query.get('view') : (query.has('room')?'desk':'materials');
-let labTab = query.get('tab') || null;
+const titles = {materials:'课件活化',desk:'智慧讲台',lab:'交互模组库',system:'Harness 架构与接口协议',workshop:'独立互动',replay:'学情复盘',student:'学生端',stage:'投影',remote:'手机遥控'};
+const teacherViews = ['materials','desk','lab','workshop','replay','system'];
+let teacherExtension = null;
+let view = 'materials';
+let labTab = null;
+
 let session, unsubscribe, offStatus, cleanup, toastTimer, restoreFocus;
-let pendingPage, lectureKeyboard, architectureUrl, qrScript;
+let pendingPage, lectureKeyboard, qrScript, mountedPage;
+let initialSplitRoom = null;
 let generation = 0;
 let publishingLesson = false;
 let railOpen = false;
+let classroomStarted = false;
+let teacherPassphrase = '';
 const mobileShell = matchMedia('(max-width: 850px)');
 const roleFor = v => v === 'stage' || v === 'student' ? v : 'teacher';
-const brand = '<img class="shell-brand-mark" src="./assets/mark.svg" alt="" width="40" height="40"><span class="shell-brand-name"><b>共演</b><span>Polyphony</span></span>';
+const brand = '<img class="shell-brand-mark" src="./assets/mark.svg" alt="" width="40" height="40"><span class="shell-brand-name"><b>共演智课</b><span>Polyphony</span></span>';
 const readStorage = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
 const writeStorage = (key, value) => { try { localStorage.setItem(key,JSON.stringify(value)); } catch { /* Browser storage may be full. */ } };
 
@@ -32,28 +35,28 @@ function toast(message) {
 
 function localize(error) {
   const detail = error?.message || String(error);
-  if (/passphrase|口令/i.test(detail)) return '需要输入教师口令才能创建课堂或执行此操作。';
-  if (/pairing token|配对/i.test(detail)) return '遥控配对链接已失效或已被使用，请在讲台电脑上重新生成。';
-  if (/teacher desk|teacher session|teacher credential|teacher access/i.test(detail)) return '请回到创建这间课堂的浏览器打开教师台，或在讲台电脑上使用「手机遥控」扫码接管。';
-  if (/unavailable in this browser/i.test(detail)) return '这个浏览器里没有这间排练室，请从创建课堂的同一浏览器打开。';
+  if (error?.code === 'teacher-passphrase-required') return '请输入正确的教师口令。';
+  if (/teacher desk|teacher session|teacher credential|teacher access/i.test(detail)) return '请在创建课堂的浏览器打开教师台，或扫描教师台的手机遥控二维码。';
+  if (/unavailable in this browser/i.test(detail)) return '这个浏览器里没有这间离线课堂，请从创建课堂的同一浏览器打开。';
   if (/valid six|room code/i.test(detail)) return '请输入六位课堂码。';
   if (/room not found|unknown room|no such room/i.test(detail)) return '没有找到这间课堂，请核对课堂码或重新打开邀请链接。';
   if (/failed to fetch|networkerror|classroom server is unavailable/i.test(detail)) return '暂时连不上课堂服务，请检查网络后再试。';
   return detail;
 }
 
+const recentKey = () => teacherExtension ? 'polyphony.demo.recent.v1' : 'polyphony.recent.v1';
 function recentRooms() {
-  const rooms = readStorage('polyphony.recent.v1', []);
+  const rooms = readStorage(recentKey(), []);
   return Array.isArray(rooms) ? rooms.filter(room => room?.code && room.title) : [];
 }
 function remember() {
-  if (!session || roleFor(view) !== 'teacher') return;
+  if (!classroomStarted || !session || roleFor(view) !== 'teacher' || view === 'remote') return;
   const {code,lesson,phase,demo} = session.state;
   const entry = {code,title:session.state.lecture?.title||lesson.title,phase,demo,mode:session.mode,at:Date.now()};
   const records = recentRooms();
   if (records[0]?.code === code && records[0].phase === phase && records[0].title === entry.title &&
       records[0].mode === entry.mode && records[0].demo === demo) return;
-  writeStorage('polyphony.recent.v1',[entry,...records.filter(item => item.code !== code)].slice(0,16));
+  writeStorage(recentKey(),[entry,...records.filter(item => item.code !== code)].slice(0,16));
 }
 
 function setAddress(v, code, replace = false, tab = null) {
@@ -101,6 +104,50 @@ function modal(title, html) {
   });
   dialog.showModal();
   return dialog;
+}
+
+async function withTeacherPassphrase(request) {
+  try { return await request(teacherPassphrase); }
+  catch (error) { if (error.code !== 'teacher-passphrase-required') throw error; }
+  teacherPassphrase = '';
+  const dialog = modal('教师口令', `<form data-teacher-confirm><label class="field-caption" for="teacher-passphrase">课堂服务口令</label>
+    <input class="field-select" id="teacher-passphrase" name="passphrase" type="password" autocomplete="current-password" required>
+    <p class="dialog-feedback" role="status"></p><button type="submit" class="action-primary dialog-full">确认并继续</button></form>`);
+  const form = dialog.querySelector('form');
+  const input = form.elements.passphrase;
+  const submit = form.querySelector('button');
+  const feedback = form.querySelector('[role=status]');
+  input.focus();
+  return new Promise((resolve, reject) => {
+    dialog.addEventListener('close', () => reject(new Error('已取消教师口令验证。')), { once:true });
+    form.onsubmit = async event => {
+      event.preventDefault();
+      if (submit.disabled) return;
+      const credential = input.value;
+      dialog.setAttribute('aria-busy', 'true');
+      submit.disabled = input.disabled = true;
+      feedback.textContent = '正在验证…';
+      try {
+        const result = await request(credential);
+        if (!dialog.isConnected) { result?.close?.(); return; }
+        teacherPassphrase = credential;
+        resolve(result);
+        closeModal();
+      } catch (error) {
+        if (!dialog.isConnected) return;
+        if (error.code !== 'teacher-passphrase-required') {
+          reject(error);
+          closeModal();
+          return;
+        }
+        dialog.removeAttribute('aria-busy');
+        submit.disabled = input.disabled = false;
+        feedback.dataset.kind = 'error';
+        feedback.textContent = localize(error);
+        input.select();
+      }
+    };
+  });
 }
 
 async function copy(value) {
@@ -204,241 +251,136 @@ function invite() {
   dialog.querySelector('[data-open-student]')?.addEventListener('click', () => openSurface('student'));
 }
 
-function confirmDialog({ title = '确认操作', message = '', confirmLabel = '确认', cancelLabel = '取消', danger = false } = {}) {
-  return new Promise(resolve => {
-    let settled = false;
-    const finish = value => {
-      if (settled) return;
-      settled = true;
-      closeModal();
-      resolve(value);
-    };
-    const dialog = modal(title, `
-      <p class="dialog-intro">${esc(message)}</p>
-      <div class="dialog-actions">
-        <button type="button" class="plain-button" data-confirm-no>${esc(cancelLabel)}</button>
-        <button type="button" class="${danger ? 'action-danger' : 'action-primary'}" data-confirm-yes>${esc(confirmLabel)}</button>
-      </div>`);
-    dialog.addEventListener('close', () => { if (!settled) { settled = true; resolve(false); } });
-    dialog.querySelector('[data-confirm-no]').onclick = () => finish(false);
-    dialog.querySelector('[data-confirm-yes]').onclick = () => finish(true);
-    dialog.querySelector('[data-confirm-no]').focus();
-  });
-}
-
 async function remotePair() {
-  if (!session || session.mode !== 'server' || typeof session.createRemotePair !== 'function') {
-    toast('当前为本地浏览器排练模式，需在联机课堂服务下使用手机遥控。');
+  const active = session;
+  if (active?.mode === 'local') {
+    const split = app.querySelector('[data-inline-action=split]');
+    if (!split) return toast('请在课件讲台打开同屏演示。');
+    if (split.getAttribute('aria-pressed') !== 'true') split.click();
+    app.querySelector('[data-companion-view=remote]')?.click();
     return;
   }
-  const dialog = modal('手机遥控配对', `
-    <p class="dialog-intro">用手机或平板扫码即可接管当前课堂的翻页、互动与讲台控制。配对码仅可使用一次，5 分钟内有效。</p>
-    <div class="invite-layout">
-      <div id="room-qr" class="room-qr" role="img" aria-label="教师遥控配对二维码"></div>
-      <div>
-        <span class="field-caption">有效倒计时</span>
-        <div class="invite-code" data-pair-timer>05:00</div>
-        <button type="button" class="text-button" data-pair-refresh>${icon('replay', 14)}重新生成</button>
-      </div>
-    </div>
-    <label class="field-caption" for="pair-link">遥控链接（一次性，请勿发给学生）</label>
-    <div class="input-line">
-      <input id="pair-link" readonly value="正在生成配对链接…">
-      <button type="button" class="plain-button" data-copy-pair disabled>复制链接</button>
-    </div>
-    <p class="dialog-feedback" data-pair-status role="status"></p>`);
-  const linkInput = dialog.querySelector('#pair-link');
-  const copyBtn = dialog.querySelector('[data-copy-pair]');
-  const timerEl = dialog.querySelector('[data-pair-timer]');
-  const statusEl = dialog.querySelector('[data-pair-status]');
-  const refreshBtn = dialog.querySelector('[data-pair-refresh]');
-  let countdown;
-  let activeUrl = '';
-
-  const stopTimer = () => { if (countdown) { clearInterval(countdown); countdown = undefined; } };
-  dialog.addEventListener('close', stopTimer);
-
-  async function generate() {
-    stopTimer();
-    refreshBtn.disabled = true;
-    copyBtn.disabled = true;
-    statusEl.dataset.kind = 'pending';
-    statusEl.textContent = '正在生成一次性配对二维码…';
-    try {
-      const pair = await session.createRemotePair();
-      if (!dialog.isConnected) return;
-      activeUrl = pair.url;
-      linkInput.value = activeUrl;
-      copyBtn.disabled = false;
-      statusEl.textContent = '';
-      void renderInviteCode(dialog, activeUrl);
-      const tick = () => {
-        if (!dialog.isConnected) return stopTimer();
-        const remaining = Math.max(0, Math.ceil((pair.expiresAt - Date.now()) / 1000));
-        const mm = String(Math.floor(remaining / 60)).padStart(2, '0');
-        const ss = String(remaining % 60).padStart(2, '0');
-        timerEl.textContent = `${mm}:${ss}`;
-        if (remaining <= 0) {
-          stopTimer();
-          statusEl.dataset.kind = 'error';
-          statusEl.textContent = '配对码已过期，请点击「重新生成」。';
-        }
-      };
-      tick();
-      countdown = setInterval(tick, 1000);
-    } catch (error) {
-      if (!dialog.isConnected) return;
-      statusEl.dataset.kind = 'error';
-      statusEl.textContent = localize(error);
-      linkInput.value = '';
-    } finally {
-      if (dialog.isConnected) refreshBtn.disabled = false;
-    }
+  if (!active?.createRemotePair) return;
+  const dialog = modal('手机遥控配对', `<p class="dialog-intro">用教师自己的手机扫码。配对链接五分钟内有效，只能使用一次。</p>
+    <div id="room-qr" class="room-qr" role="img" aria-label="教师手机遥控二维码" hidden></div>
+    <div data-remote-link hidden><label class="field-caption" for="remote-link">配对链接</label><div class="input-line">
+      <input id="remote-link" readonly><button type="button" class="plain-button" data-copy-remote>复制</button></div></div>
+    <p class="dialog-feedback" role="status">正在生成配对链接…</p>`);
+  const feedback = dialog.querySelector('[role=status]');
+  try {
+    const pair = await active.createRemotePair();
+    if (!dialog.isConnected || session !== active) return;
+    dialog.querySelector('#remote-link').value = pair.url;
+    dialog.querySelector('[data-remote-link]').hidden = false;
+    dialog.querySelector('#room-qr').hidden = false;
+    const expires = new Date(pair.expiresAt).toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' });
+    feedback.textContent = '有效至 ' + expires;
+    dialog.querySelector('[data-copy-remote]').onclick = async () => {
+      if (Date.now() >= pair.expiresAt) {
+        feedback.textContent = '链接已过期，请关闭窗口后重新配对。';
+        return;
+      }
+      feedback.textContent = await copy(pair.url) ? '已复制教师配对链接' : '请选择链接并手动复制。';
+    };
+    await renderInviteCode(dialog, pair.url);
+  } catch (error) {
+    feedback.dataset.kind = 'error';
+    feedback.textContent = localize(error);
   }
-
-  copyBtn.onclick = async () => {
-    if (!activeUrl) return;
-    const copied = await copy(activeUrl);
-    statusEl.dataset.kind = copied ? 'success' : 'error';
-    statusEl.textContent = copied ? '已复制遥控链接，请在教师手机打开' : '请选中链接手动复制。';
-  };
-  refreshBtn.onclick = () => { void generate(); };
-  void generate();
 }
 
-const phaseText = {collect:'收集中',reveal:'结果已公布',branch:'分支讨论',closed:'已结课'};
 function roomChooser() {
   const current = session;
-  const local = current.mode === 'local';
-  const records = recentRooms().slice(0,5);
-  const list = records.map(item => {
-    const open = item.code === current.code;
-    const kind = item.demo ? '样本排练' : item.mode === 'local' ? '空白排练' : item.mode === 'server' ? '现场课堂' : '';
-    return `<button type="button" class="recent-room" data-restore="${esc(item.code)}"${open ? ' aria-current="true"' : ''}>
-      <span><b>${esc(item.title)}</b><small>${esc([item.code, kind, phaseText[item.phase]].filter(Boolean).join(' · '))}</small></span>
-      ${open ? '<em>当前课堂</em>' : icon('chevron-right',17)}</button>`;
-  }).join('');
-  const options = lessons.map(lesson => `<option value="${esc(lesson.id)}"${lesson.id === current.state.lessonId ? ' selected' : ''}>${esc(lesson.title)}</option>`).join('');
-  const dialog = modal('课堂管理', `
-    <section class="dialog-section" aria-labelledby="new-room-heading">
-      <h3 id="new-room-heading">新建课堂</h3>
-      <form data-create-room>
-        <label class="field-caption" for="new-lesson">选择起始课谱</label>
-        <select id="new-lesson" class="field-select" name="lesson">${options}</select>
-        <fieldset class="room-modes"><legend class="field-caption">课堂模式</legend><div>
-          <label><input type="radio" name="mode" value="empty" checked><strong>${local ? '空白排练' : '现场课堂'}</strong>
-            <small>${local ? '在同一浏览器用空白课堂演练' : '只统计学生的现场提交'}</small></label>
-          <label><input type="radio" name="mode" value="demo"><strong>样本排练</strong><small>自带已标记的模拟作答</small></label>
-        </div></fieldset>
-        <button type="submit" data-create class="action-primary dialog-full">${icon('plus',17)}创建课堂</button>
-      </form>
-      <p class="dialog-feedback" data-room-feedback role="status"></p>
-    </section>
-    <section class="dialog-section" aria-labelledby="switch-room-heading">
-      <h3 id="switch-room-heading">切换课堂</h3>
-      <form data-switch-room><label for="switch-code" class="visually-hidden">要打开的六位课堂码</label><div class="input-line">
-        <input id="switch-code" name="room" maxlength="6" minlength="6" pattern="[0-9A-Za-z]{6}" placeholder="输入六位课堂码"
-          autocomplete="off" autocapitalize="characters" spellcheck="false" required>
-        <button type="submit" class="plain-button">打开课堂</button></div></form>
-      <p class="dialog-feedback" data-room-feedback role="status"></p>
-      ${list ? '<p class="field-caption" id="recent-rooms-heading">最近打开</p><div class="recent-rooms" aria-labelledby="recent-rooms-heading">' + list + '</div>' : ''}
-    </section>`);
-  const controls = [...dialog.querySelectorAll('input, select, button')];
-  const feedback = [...dialog.querySelectorAll('[data-room-feedback]')];
-  const busy = pending => {
-    dialog.setAttribute('aria-busy', String(pending));
-    for (const control of controls) control.disabled = pending;
-  };
-  async function changeRoom(action, message, trigger) {
+  const records = recentRooms();
+  const list = records.map(room => `<button type="button" class="recent-room" data-restore="${esc(room.code)}">
+    <span><b>${esc(room.title)}</b><small>${esc(room.code)}${room.demo ? ' · 演示' : ''}</small></span>${icon('chevron-right',16)}
+  </button>`).join('');
+  const dialog = modal('课堂记录', `
+    <div class="recent-rooms">${list}</div>
+    <details class="prep-options"><summary>按课堂码打开</summary>
+      <form data-open-room><label class="field-caption" for="switch-code">课堂码</label><div class="input-line">
+        <input id="switch-code" name="room" maxlength="6" minlength="6" pattern="[0-9A-Za-z]{6}" autocomplete="off" required>
+        <button type="submit" class="plain-button">打开</button></div></form>
+    </details>
+    <p class="dialog-feedback" data-room-feedback role="status"></p>`);
+  const feedback = dialog.querySelector('[data-room-feedback]');
+  async function open(code, target) {
     if (dialog.getAttribute('aria-busy') === 'true') return;
-    const status = trigger?.closest('section')?.querySelector('[data-room-feedback]') ?? feedback[0];
-    for (const item of feedback) item.textContent = '';
-    busy(true);
-    status.dataset.kind = 'pending';
-    status.textContent = '正在连接课堂…';
+    dialog.setAttribute('aria-busy','true');
+    feedback.textContent = '正在打开课堂…';
     try {
-      const next = await action();
-      if (session !== current || !dialog.isConnected) { next.close(); return; }
-      activate(next, 'desk');
+      const next = code === current.code ? current : await openSession({ role:'teacher', room:code });
+      if (session !== current || !dialog.isConnected) { if (next !== current) next.close(); return; }
+      const ended = next.state.lecture ? next.state.lecture.mode === 'ended' : next.state.phase === 'closed';
+      activate(next, ended ? 'replay' : 'desk');
       focusSurface();
-      toast(message);
     } catch (error) {
       if (!dialog.isConnected) return;
-      busy(false);
-      status.dataset.kind = 'error';
-      status.textContent = localize(error);
-      trigger?.focus();
+      feedback.textContent = localize(error);
+      dialog.removeAttribute('aria-busy');
+      target?.focus();
     }
   }
-  function switchTo(code, trigger) {
-    if (code === current.code) { closeModal(); return; }
-    changeRoom(() => openSession({role:'teacher',room:code}), '已切换课堂', trigger);
-  }
-  dialog.querySelector('[data-create-room]').onsubmit = event => {
+  dialog.querySelectorAll('[data-restore]').forEach(button => button.onclick = () => open(button.dataset.restore,button));
+  dialog.querySelector('[data-open-room]').onsubmit = event => {
     event.preventDefault();
-    const options = new FormData(event.currentTarget);
-    const trigger = event.submitter ?? event.currentTarget.querySelector('[type="submit"]');
-    changeRoom(() => current.newRoom({lessonId:options.get('lesson'),demo:options.get('mode') === 'demo'}), '新课堂已开启', trigger);
+    open(event.currentTarget.elements.room.value.trim().toUpperCase(),event.submitter);
   };
-  dialog.querySelector('[data-switch-room]').onsubmit = event => {
-    event.preventDefault();
-    const code = event.currentTarget.elements.room.value.trim().toUpperCase();
-    switchTo(code, event.submitter ?? event.currentTarget.querySelector('[type="submit"]'));
-  };
-  for (const button of dialog.querySelectorAll('[data-restore]')) button.onclick = () => switchTo(button.dataset.restore, button);
 }
 
 function navLink(name, glyph) {
-  const current = name === view ? ' aria-current="page"' : '';
+  const current = (name === view || (name === 'materials' && view === 'workshop')) ? ' aria-current="page"' : '';
   return '<a class="shell-nav-link" data-nav="'+name+'" href="?view='+name+'&amp;room='+esc(session.code)+'"'+current+'>'+icon(glyph,19)+'<span>'+titles[name]+'</span></a>';
 }
 
-function surfaceLink(name, glyph) {
-  return '<a class="shell-surface-link" href="'+esc(localSurfaceUrl(name))+'" target="_blank" rel="noopener" title="'+titles[name]+'（新窗口）" aria-label="'+titles[name]+'（新窗口）">'+icon(glyph,18)+'<span>'+titles[name]+'</span></a>';
-}
-
 function paintShellStatus() {
+  const capsule = app.querySelector('[data-api-status]');
+  const summary = session.providerSummary;
+  if (capsule) capsule.textContent = summary?.configured ? summary.model ?? '主模型已配置' :
+    summary?.fastConfigured ? '快速决策模型已配置' : '未配密钥 · 本地编排就绪';
   const status = app.querySelector('[data-shell-status]');
   if (!status) return;
-  const connected = session.connected !== false;
   const local = session.mode === 'local';
-  const label = local ? '浏览器排练' : connected ? '实时课堂服务' : '正在连接课堂';
+  const connected = session.connected !== false;
+  const label = local ? '本机课堂' : connected ? '已连接' : '正在连接课堂…';
   const mode = status.querySelector('[data-mode]');
   if (mode.textContent !== label) mode.textContent = label;
   status.dataset.connection = local ? 'local' : connected ? 'online' : 'pending';
-  const lesson = app.querySelector('[data-shell-lesson]');
-  const title=session.state.lecture?.title||session.state.lesson.title;
-  if (lesson.textContent !== title) {
-    lesson.textContent = title;
-    lesson.title = title;
-  }
 }
 
 function paintShell() {
   clearPage();
   setRail(false, false);
-  const standalone = roleFor(view) !== 'teacher';
+  const standalone = roleFor(view) !== 'teacher' || view === 'remote';
   document.body.classList.toggle('standalone', standalone);
   if (standalone) {
-    app.innerHTML = '<main id="surface"></main>';
+    app.innerHTML = view === 'remote' ? '<main id="surface" class="remote-surface" tabindex="-1"></main>' : '<main id="surface"></main>';
     return;
   }
-  const roomCode = esc(session.code);
-  app.innerHTML = '<div class="workspace shell-workspace"><a class="shell-skip" href="#surface">跳到页面内容</a><aside id="rail" class="shell-rail" aria-label="教师导航">'+
-    '<div class="shell-brand-row"><a class="shell-brand" href="?view=desk&amp;room='+roomCode+'" data-nav="desk" aria-label="共演课堂控制台">'+brand+'</a>'+
-    '<button type="button" class="shell-drawer-close" data-rail-close aria-label="收起导航">'+icon('close',20)+'</button></div>'+
-    '<nav class="shell-nav" aria-label="教师工作区"><div class="shell-nav-group"><p class="shell-nav-heading">教学工作区</p>'+
-    navLink('materials','book')+navLink('workshop','workshop')+navLink('desk','desk')+navLink('replay','replay')+'</div>'+
-    '<div class="shell-nav-group"><p class="shell-nav-heading">教学工具</p>'+navLink('lab','lab')+navLink('system','network')+'</div></nav>'+
-    '<div class="shell-rail-footer"><div class="shell-room-context"><span class="shell-room-context-icon">'+icon('book',17)+'</span><div><span>当前课堂</span><strong data-shell-lesson></strong></div></div>'+
-    '<div class="shell-connection" data-shell-status role="status"><i aria-hidden="true"></i><span data-mode></span></div></div></aside>'+
-    '<button type="button" class="shell-scrim" data-rail-close tabindex="-1" aria-label="收起导航"></button><div class="shell-main">'+
-    '<header class="shell-header"><div class="shell-header-inner"><div class="shell-header-left">'+
-    '<button type="button" class="shell-drawer-open" data-rail-open aria-label="展开导航" aria-controls="rail" aria-expanded="false">'+icon('menu',21)+'</button>'+
-    '<span class="shell-crumb">教师工作区</span><span class="shell-crumb">'+icon('chevron-right',13)+'</span><strong class="shell-current">'+titles[view]+'</strong></div>'+
-    '<div class="shell-header-actions">'+(view === 'desk' ? '' : surfaceLink('stage','monitor')+surfaceLink('student','smartphone'))+
-    '<button type="button" class="shell-room-button" data-rooms aria-haspopup="dialog" aria-label="课堂管理，切换或创建课堂，当前课堂码 '+roomCode+'"><span>课堂码</span><b>'+roomCode+'</b>'+icon('chevron-down',13)+'</button></div></div></header>'+
-    '<main id="surface" class="content shell-content" tabindex="-1"></main></div></div>';
+
+  app.innerHTML = `<div class="workspace shell-workspace"><a class="shell-skip" href="#surface">跳到页面内容</a>
+    <aside id="rail" class="shell-rail" aria-label="教师导航">
+      <div class="shell-brand-row"><a class="shell-brand" href="?view=materials&amp;room=${esc(session.code)}" data-nav="materials" aria-label="共演智课 · 备课">${brand}</a>
+        <button type="button" class="shell-drawer-close" data-rail-close aria-label="收起导航">${icon('close',20)}</button></div>
+      <nav class="shell-nav" aria-label="教师工作区"><div class="shell-nav-group">
+        ${navLink('materials','book')}${navLink('desk','desk')}${navLink('lab','lab')}${navLink('replay','replay')}
+      </div></nav>
+      <div class="shell-rail-footer"><div class="shell-secondary-nav">${navLink('system','network')}</div><div class="shell-connection" data-shell-status role="status"><i aria-hidden="true"></i><span data-mode></span></div></div>
+    </aside>
+    <button type="button" class="shell-scrim" data-rail-close tabindex="-1" aria-label="收起导航"></button>
+    <div class="shell-main"><header class="shell-header"><div class="shell-header-inner">
+      <div class="shell-header-left">
+        <button type="button" class="shell-drawer-open" data-rail-open aria-label="展开导航" aria-controls="rail" aria-expanded="false">${icon('menu',21)}</button>
+        <strong class="shell-current">${titles[view]}</strong>
+      </div>
+      <div class="shell-header-actions">
+        <button type="button" class="v3-api-button" data-api-hub aria-haspopup="dialog">🔌 模型 API <small data-api-status></small></button>
+        ${classroomStarted ? '<button type="button" class="shell-room-button" data-projector>投影大屏</button><button type="button" class="shell-room-button" data-student>学生端</button><button type="button" class="shell-room-button" data-remote-pair>手机遥控</button>' : ''}
+        <button type="button" class="shell-room-button" data-invite>课堂码</button>
+        <button type="button" class="shell-room-button" data-rooms aria-haspopup="dialog">课堂记录</button>
+      </div>
+    </div></header><main id="surface" class="content shell-content" tabindex="-1"></main></div></div>`;
+
   for (const link of app.querySelectorAll('[data-nav]')) link.onclick = event => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
@@ -446,7 +388,16 @@ function paintShell() {
   };
   app.querySelector('[data-rail-open]').onclick = () => setRail(true);
   for (const button of app.querySelectorAll('[data-rail-close]')) button.onclick = () => setRail(false);
-  app.querySelector('[data-rooms]').onclick = roomChooser;
+  app.querySelector('[data-rooms]')?.addEventListener('click', roomChooser);
+  app.querySelector('[data-api-hub]').onclick = () => modelApiDialog(() => {
+    paintShellStatus();
+    if (view === 'desk' && session.state.lecture) paintPage();
+  });
+  app.querySelector('[data-projector]')?.addEventListener('click',()=>openSurface('stage'));
+  app.querySelector('[data-student]')?.addEventListener('click',()=>openSurface('student'));
+  app.querySelector('[data-invite]')?.addEventListener('click',invite);
+  app.querySelector('[data-remote-pair]')?.addEventListener('click', remotePair);
+  teacherExtension?.mountHeader?.(app.querySelector('.shell-header-actions'), context, openMaterialFile);
   paintShellStatus();
   setRail(false, false);
 }
@@ -491,16 +442,16 @@ async function startLesson(lesson) {
   const active = session;
   const built = getLesson(lesson.id);
   const canonical = built && JSON.stringify(built) === JSON.stringify(lesson);
-  const prepared = canonical ? built : importScore(exportScore(lesson));
+  const prepared = canonical ? built : importScore(exportScore(built ? { ...lesson, id: 'import-' + lesson.id } : lesson));
   let next;
   publishingLesson = true;
   try {
-    next = await active.newRoom({lessonId:built?.id || 'mzi',demo:false});
+    next = await withTeacherPassphrase(passphrase => active.newRoom({lessonId:built?.id || WORKSPACE_LESSON_ID,demo:false,passphrase}));
     if (!canonical) await next.command('loadLesson',{lesson:prepared});
-    if (session !== active) throw new Error('当前课堂已切换，请重新发布课谱。');
+    if (session !== active) throw new Error('当前课堂已切换，请重新发布互动配置。');
     activate(next,'desk');
     focusSurface();
-    toast('课谱已发布，新课堂已开启');
+    toast('互动配置已发布，新课堂已开启');
   } catch (error) {
     next?.close();
     throw error;
@@ -509,68 +460,170 @@ async function startLesson(lesson) {
   }
 }
 
-async function startLecture(lecture) {
+async function startLecture(lecture, { experiment = false, initialSplit = false, prepare } = {}) {
   if (publishingLesson) throw new Error('正在创建课堂，请稍候。');
   publishingLesson=true;
   const active=session;
   let next;
   try {
-    next=await active.newRoom({lecture,demo:false});
+    next=await withTeacherPassphrase(passphrase => active.newRoom({lecture,demo:false,passphrase}));
+    if (experiment) await next.command('lectureExperimentStart',{expectedLectureIndex:next.state.lecture.index,expectedLectureTurn:next.state.lecture.turn});
+    if (experiment && next.state.experiment?.kind === 'light' && next.state.experiment.step === 'draw') {
+      await next.command('lectureExperimentAct',{action:'fit',target:next.state.experiment.target,
+        expectedLectureIndex:next.state.lecture.index,expectedLectureTurn:next.state.lecture.turn});
+    }
+    if (prepare) await prepare((type, payload) => context(next, 'desk').command(type, payload));
     if (session!==active) throw new Error('备课房间已切换，请重新打开讲义。');
-    activate(next,'desk');focusSurface();
+    initialSplitRoom = initialSplit ? next.code : null;
+    activate(next, next.state.lecture.mode === 'ended' ? 'replay' : 'desk');focusSurface();
     return {code:next.code};
   } catch(error) {next?.close();throw error;}
   finally {publishingLesson=false;}
 }
 
-function context() {
-  const active=session, snapshot=active.state;
-  return {state:snapshot,mode:active.mode,connected:active.connected,participantId:active.participantId,tab:labTab,esc,icon,toast,go,invite,
-    remotePair:active.mode === 'server' ? remotePair : null,
-    confirmDialog,
-    open:openSurface,url:v=>active.url(v),
-    askPeer:active.assistedComposition && snapshot.lecture ? ()=>active.askPeer(snapshot.lecture.index,snapshot.lecture.turn) : null,
+function context(active = session, surface = view) {
+  const snapshot = active.state;
+  return {state:snapshot,mode:active.mode,connected:active.connected,remote:surface==='remote',participantId:active.participantId,tab:labTab,esc,icon,toast,copy,go,invite,open:openSurface,url:v=>active.url(v),
+    demonstration: Boolean(teacherExtension) && surface !== 'materials', configureModel: modelApiDialog,
+    initialSplit: surface === 'desk' && active.code === initialSplitRoom,
+    remotePair: active.mode === 'server' ? remotePair : null,
+    openCompanion: surface === 'desk' && snapshot.lecture ? async seat => {
+      const remote = seat === 'remote';
+      const companion = await openSession({role:remote ? 'teacher' : 'student', room:active.code, seat:remote ? undefined : seat});
+      return {
+        context: () => context(companion, remote ? 'remote' : 'student'),
+        subscribe: companion.subscribe,
+        subscribeStatus: companion.subscribeStatus,
+        close: () => companion.close(),
+      };
+    } : null,
+    regeneratePage:payload=>active.regeneratePage(payload),
+    reviseSlide:(payload,options)=>active.reviseSlide(payload,options),
+    askPeer:snapshot.lecture ? ()=>active.askPeer(snapshot.lecture.index,snapshot.lecture.turn) : null,
     startLecture,startLesson,getState:()=>active.state,getRoomState:()=>active.state,getFrame:index=>active.getFrame(index),
-    getOutline:()=>active.getOutline ? active.getOutline() : Promise.resolve([]),
+    get providerSummary(){return active.providerSummary;},runHarness:(material,options)=>active.runHarness(material,options),authorDeck:(spec,options)=>active.authorDeck(spec,options),
+    adaptMaterial:(material,options)=>active.adaptMaterial(material, teacherExtension?.adaptOptions?.(material,options) ?? options),
+    searchMedia:(input,options)=>active.searchMedia(input,options),
+    quickTriage:(options)=>active.quickTriage(snapshot.lecture.index,snapshot.lecture.turn,options),
     materialRendering:!!active.materialRendering,
-    importMaterial:file=>active.importMaterial(file),planLecture:material=>active.planLecture(material),
-    modelAvailable:!!active.assistedComposition,aiOutputMode:active.aiOutputMode,compose:input=>active.compose(input),
-    command:(type,payload={})=>active.command(type,{...payload,expectedRound:snapshot.round,expectedLessonId:snapshot.lessonId,
-      ...(snapshot.lecture&&{expectedLectureIndex:snapshot.lecture.index,expectedLectureTurn:snapshot.lecture.turn})})};
+    importMaterial:file=>withTeacherPassphrase(passphrase => active.importMaterial(file,passphrase)),planLecture:material=>active.planLecture(material),
+    modelAvailable:active.mode === 'server' && Boolean(active.providerSummary?.configured ?? active.assistedComposition),
+    analysisAvailable:active.mode === 'server' && Boolean(active.providerSummary?.configured || active.providerSummary?.fastConfigured),
+    aiOutputMode:active.aiOutputMode,compose:input=>active.compose(input),
+    command:async(type,payload={})=>{const result = await active.command(type,{...payload,expectedRound:snapshot.round,expectedLessonId:snapshot.lessonId,
+      ...(snapshot.lecture&&{expectedLectureIndex:snapshot.lecture.index,expectedLectureTurn:snapshot.lecture.turn})});
+      if (active === session && roleFor(view) === 'teacher') {
+        classroomStarted = true;
+        writeStorage('polyphony.workspace.pending.v1', readStorage('polyphony.workspace.pending.v1', []).filter(code => code !== active.code));
+        remember(); paintShellStatus();
+      }
+      return result;}};
 }
 
-function systemView(root) {
-  const server=session.mode==='server';
-  const planning={jev:'Jev · System One',chat:'Chat Completions',local:'本地规则'}[session.lecturePlanProvider] ?? '本地规则';
-  const current=getActivity(session.state.lesson)?.id;
-  const embedded = document.getElementById('polyphony-architecture');
-  if (embedded && !architectureUrl) {
-    const bytes = Uint8Array.from(atob(embedded.textContent), character => character.charCodeAt(0));
-    architectureUrl = URL.createObjectURL(new Blob([bytes], {type:'image/svg+xml;charset=utf-8'}));
-  }
-  const diagram = esc(architectureUrl ?? './assets/architecture.svg');
-  root.innerHTML='<div class="sys-view"><header><h1>系统架构</h1><p>查看当前运行环境、活动接口和从备课到课堂回顾的数据流。</p></header>'+
-    '<div class="sys-status"><article><span>'+icon('radio',16)+'运行环境</span><b>'+(server?'实时课堂服务':'浏览器排练')+'</b><p>'+(server?'教师、学生和投影共用同一房间。':'同一浏览器的多个窗口可同步排练。')+'</p></article>'+
-    '<article><span>'+icon('sparkles',16)+'原页排课</span><b>'+esc(planning)+'</b><p>工坊与课堂评议使用'+(session.assistedAnalysis?' Chat Completions · '+esc(session.aiOutputMode):'本地模板与规则')+'。</p></article>'+
-    '<article><span>'+icon('book',16)+'课谱与事件</span><b>'+lessons.length+' 门内置课谱</b><p>当前课堂已记录 '+session.state.events.length+' 个事件。</p></article></div>'+
-    '<section class="map-panel"><div class="map-heading"><div><h2>平台数据流</h2><p>导入原稿，按页排课、校验和采用，再在同一房间讲授、互动、回顾。</p></div><a class="plain-button" data-focus="architecture-original" href="'+diagram+'" target="_blank" rel="noopener">'+icon('maximize',16)+'查看原图</a></div><a class="map-image" data-focus="architecture-image" href="'+diagram+'" target="_blank" rel="noopener" aria-label="放大系统架构图"><img src="'+diagram+'" alt="共演系统架构，展示课件导入、原页校核、原生授课、三端同步与证据回放"></a></section>'+
-    '<section class="map-panel"><h2>活动接口</h2><p>课谱固定活动版本，提交和公开命令驱动对应的活动界面。</p><div class="manifest-list">'+activities.map(activity=>
-      '<div'+(activity.id===current?' class="manifest-current"':'')+'><span><b>'+esc(activity.title)+'</b><code>'+esc(activity.id)+'</code></span><small>'+esc(activity.input)+' → '+esc(activity.aggregate)+'</small>'+(activity.id===current?'<em>本课使用</em>':'')+'</div>').join('')+'</div></section></div>';
+
+
+function modelApiDialog(onUpdate) {
+  const active = session;
+  const summary = active.providerSummary ?? {};
+  const outputOptions = '<option value="json_object">JSON Object（通用兼容）</option><option value="json_schema">JSON Schema（严格结构）</option><option value="text">Text JSON（兼容网关）</option>';
+  const dialog = modal('模型设置', `<p class="dialog-intro">通过兼容 Chat Completions 的网关连接模型。</p>
+    <form class="v3-provider-form" autocomplete="off">
+      <label>预设端点<select name="preset"><option value="custom">自定义 / 校园网关</option><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="qwen">Qwen</option><option value="gemini">Gemini（兼容协议）</option></select></label>
+      <label>Base URL<input type="url" name="baseUrl" maxlength="8000" placeholder="https://gateway.example.edu/v1"></label>
+      <label>Model<input name="model" maxlength="8000" value="${esc(summary.model ?? '')}" placeholder="主生成模型"></label>
+      <label>API Key<input type="password" name="key" maxlength="8000" autocomplete="new-password" placeholder="${summary.configured ? '留空使用当前会话的主密钥' : '主模型密钥'}"></label>
+      <label>输出模式<select name="outputMode">${outputOptions}</select></label>
+      <fieldset class="fast-provider-settings">
+        <legend>⚡ 快速决策模型</legend>
+        <div class="fast-provider-grid">
+          <label>快速模型名<input name="fastModel" maxlength="8000" placeholder="填写模型名启用"></label>
+          <label>快速模型地址<input type="url" name="fastBaseUrl" maxlength="8000" placeholder="留空沿用当前地址或主模型地址"></label>
+          <label>快速模型密钥<input type="password" name="fastKey" maxlength="8000" autocomplete="new-password" placeholder="同源可留空，独立网关请填写"></label>
+          <label>快速模型输出模式<select name="fastOutputMode"><option value="">沿用当前设置</option><option value="inherit">继承主模型</option>${outputOptions}</select></label>
+        </div>
+        <div class="fast-provider-actions"><span data-fast-provider-status></span>
+          <button class="v3-subtle" type="button" data-provider-fast-test>测试快速模型连通性</button>
+          <button class="v3-subtle" type="button" data-provider-fast-disable>关闭快速模型</button>
+        </div>
+      </fieldset>
+      <p class="v3-secret-note">主模型和快速模型的密钥仅在当前${active.mode === 'local' ? '页面' : '服务进程'}的内存中使用。</p>
+      <div class="v3-dialog-actions"><button class="v3-subtle" type="button" data-provider-clear>清除配置</button><button class="v3-subtle" type="button" data-provider-test>测试连接</button><button class="v3-primary" type="submit">保存至当前会话</button></div>
+      <p role="status" data-provider-feedback></p>
+    </form>`);
+  const form = dialog.querySelector('form');
+  const feedback = form.querySelector('[data-provider-feedback]');
+  const disableFast = form.querySelector('[data-provider-fast-disable]');
+  const renderStatus = provider => {
+    form.querySelector('[data-fast-provider-status]').textContent = provider?.fastConfigured ? '已配置' : '未配置';
+    disableFast.hidden = !provider?.fastConfigured;
+  };
+  renderStatus(summary);
+  form.elements.outputMode.value = summary.outputMode ?? 'json_object';
+  const presets = { openai: ['https://api.openai.com/v1', 'gpt-4.1-mini'], deepseek: ['https://api.deepseek.com/v1', 'deepseek-v4-pro'], qwen: ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen-plus'], gemini: ['https://generativelanguage.googleapis.com/v1beta/openai', 'gemini-2.5-flash'] };
+  form.elements.preset.onchange = () => {
+    const preset = presets[form.elements.preset.value];
+    if (preset) [form.elements.baseUrl.value, form.elements.model.value] = preset;
+  };
+  const settings = () => {
+    const data = Object.fromEntries(new FormData(form));
+    const input = { outputMode: data.outputMode };
+    for (const name of ['baseUrl', 'model', 'key', 'fastModel', 'fastBaseUrl', 'fastKey']) {
+      if (data[name].trim()) input[name] = data[name];
+    }
+    if (data.fastOutputMode) input.fastOutputMode = data.fastOutputMode === 'inherit' ? '' : data.fastOutputMode;
+    return input;
+  };
+  const perform = async action => {
+    if (!['clear', 'disableFast'].includes(action) && !form.reportValidity()) return;
+    const test = action === 'main' || action === 'fast';
+    const input = action === 'clear' ? { clear: true } : action === 'disableFast' ? { fastModel: '' } : settings();
+    if (test) Object.assign(input, { test: true, testOnly: true, testTier: action });
+    dialog.setAttribute('aria-busy', 'true');
+    for (const button of form.querySelectorAll('button')) button.disabled = true;
+    feedback.textContent = test ? '正在测试连接（最多 12 秒）…' : '正在保存当前会话…';
+    try {
+      const result = await active.configureProvider(input);
+      feedback.textContent = action === 'clear' ? '已恢复默认配置。' : action === 'disableFast' ? '已关闭快速模型。' :
+        test ? `${action === 'fast' ? '快速模型' : '主模型'}连接测试通过。` : '已保存当前会话。';
+      if (!test) {
+        form.elements.key.value = form.elements.fastKey.value = '';
+        form.elements.fastModel.value = form.elements.fastBaseUrl.value = form.elements.fastOutputMode.value = '';
+        if (action === 'clear') {
+          form.elements.baseUrl.value = '';
+          form.elements.model.value = result.providerSummary?.model ?? '';
+          form.elements.outputMode.value = result.providerSummary?.outputMode ?? 'json_object';
+        }
+        renderStatus(result.providerSummary);
+        if (session === active) { paintShellStatus(); onUpdate?.(); }
+      }
+    } catch (error) { feedback.textContent = localize(error); }
+    finally {
+      dialog.removeAttribute('aria-busy');
+      for (const button of form.querySelectorAll('button')) button.disabled = false;
+    }
+  };
+  form.onsubmit = event => { event.preventDefault(); void perform('save'); };
+  form.querySelector('[data-provider-test]').onclick = () => perform('main');
+  form.querySelector('[data-provider-fast-test]').onclick = () => perform('fast');
+  form.querySelector('[data-provider-clear]').onclick = () => perform('clear');
+  disableFast.onclick = () => perform('disableFast');
 }
+
 
 const pages = {
   materials: {
-    styles: ['workshop', 'material-workspace', 'material-notes', 'material-science'],
+    styles: ['lecture-stage', 'material-science', 'material-workspace'],
     load: () => import('./views/material-workspace.mjs').then(module => module.renderMaterialWorkspace),
   },
+  lab: { styles:['lab','challenge-lab','cognition'], load:()=>import('./views/lab.mjs').then(module=>module.renderLab) },
+  system: { styles:['lab'], load:()=>import('./views/system.mjs').then(module=>module.renderSystem) },
   desk: { styles: ['desk'], load: () => import('./views/desk.mjs').then(module => module.renderDesk) },
   student: { styles: ['student'], load: () => import('./views/student.mjs').then(module => module.renderStudent) },
-  stage: { styles: ['surfaces'], load: () => import('./views/surfaces.mjs').then(module => module.renderStage) },
+  stage: { styles: ['cognition','surfaces'], load: () => import('./views/surfaces.mjs').then(module => module.renderStage) },
   workshop: { styles: ['workshop'], load: () => import('./views/workshop.mjs').then(module => module.renderWorkshop) },
-  replay: { styles: ['replay'], load: () => import('./views/replay.mjs').then(module => module.renderReplay) },
-  lab: { styles: ['lab', 'challenge-lab'], load: () => import('./views/lab.mjs').then(module => module.renderLab) },
-  system: { render: systemView },
+  replay: { styles: ['cognition','replay'], load: () => import('./views/replay.mjs').then(module => module.renderReplay) },
 };
+pages.remote = pages.desk;
 
 const lecturePages = Object.fromEntries(['desk', 'student', 'stage'].map(name => [name, {
   styles: [...pages[name].styles, 'material-science', 'lecture-stage', 'lecture-room', 'challenge-lab'],
@@ -579,6 +632,7 @@ const lecturePages = Object.fromEntries(['desk', 'student', 'stage'].map(name =>
     return module.renderLectureRoom;
   }),
 }]));
+lecturePages.remote = lecturePages.desk;
 
 const loadedStyles = new Map();
 function loadStyle(name) {
@@ -613,21 +667,41 @@ function preparePage(page) {
   });
 }
 
+async function openMaterialFile(file) {
+  if (view !== 'materials') go('materials');
+  const root = app.querySelector('#surface');
+  await preparePage(pages.materials);
+  if (view !== 'materials' || !root?.isConnected) throw new Error('备课工作区已切换，请重新载入。');
+  const field = root.querySelector('[data-file]');
+  if (!field || root.querySelector('[data-cancel-authoring], [data-upload]:disabled, [data-source-mode]:disabled')) {
+    throw new Error('当前备课任务尚未完成，请稍后载入。');
+  }
+  const selection = new DataTransfer();
+  selection.items.add(file);
+  field.files = selection.files;
+  field.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
 function clearPage() {
   if (typeof cleanup==='function') cleanup();
-  cleanup = pendingPage = undefined;
+  cleanup = pendingPage = mountedPage = undefined;
 }
 
 function paintPage() {
   const root = app.querySelector('#surface');
   if (!root) return;
   const page = (session.state.lecture && lecturePages[view]) || pages[view];
-  document.title='共演 Polyphony · '+titles[view];
+  document.title='共演智课 · Polyphony · '+titles[view];
   if (page.render) {
     const keepFocus = (view === 'stage' || view === 'system') && root.contains(document.activeElement);
     const control = keepFocus ? focusSelector(document.activeElement) : null;
-    clearPage();
-    cleanup = page.render(root, context(), roleFor(view));
+    const same = mountedPage?.root === root && mountedPage.view === view && mountedPage.render === page.render;
+    if (!same) clearPage();
+    if (!same || !['materials','lab','workshop','system'].includes(view)) {
+      cleanup = page.render(root, context(), roleFor(view));
+      if (view === 'desk' && session.code === initialSplitRoom) initialSplitRoom = null;
+      mountedPage = {root,view,render:page.render};
+    }
     if (control) root.querySelector(control)?.focus({preventScroll:true});
     return;
   }
@@ -656,10 +730,14 @@ function focusSurface() {
   window.scrollTo({top:0,behavior:'instant'});
 }
 
-function activate(next,v,replace=false) {
+function activate(next,v,replace=false,started=true) {
   unsubscribe?.(); offStatus?.();
   if(session && session!==next) session.close();
   session=next; view=v;
+  classroomStarted = started;
+  const pending = readStorage('polyphony.workspace.pending.v1', []).filter(code => code !== next.code);
+  if (!started) pending.push(next.code);
+  writeStorage('polyphony.workspace.pending.v1', pending.slice(-32));
   closeModal(); setAddress(view,session.code,replace,labTab); remember();
   paintShell(); paintPage();
   unsubscribe=session.subscribe(()=>{
@@ -669,18 +747,18 @@ function activate(next,v,replace=false) {
   });
   offStatus=session.subscribeStatus?.(()=>{
     paintShellStatus();
-    if (view === 'stage' || view === 'student') paintPage();
+    if (['stage','student','remote'].includes(view)) paintPage();
   });
 }
-
-let teacherPassphrase = '';
-try { teacherPassphrase = sessionStorage.getItem('polyphony.passphrase') || ''; } catch { /* ignore */ }
 
 function errorPage(message, code) {
   setRail(false, false);
   document.body.classList.remove('standalone');
+  if (view === 'remote') {
+    app.innerHTML = '<main class="shell-entry"><section class="shell-entry-card"><h1>手机遥控</h1><p class="shell-entry-hint" role="alert">'+esc(message || '请扫描教师台生成的二维码。')+'</p></section></main>';
+    return;
+  }
   const role = roleFor(view);
-  const needsPassphrase = role === 'teacher' && /口令|passphrase/i.test(message || '');
   const entry = {
     teacher: { kind:'教师端', symbol:'desk', title:'打开教师工作区', hint:'请使用创建课堂时的浏览器来重新连接。', action:'打开工作区' },
     stage: { kind:'投影端', symbol:'monitor', title:'连接投影大屏', hint:'输入教师提供的课堂码，将课堂画面投到大屏。', action:'连接投影' },
@@ -691,28 +769,19 @@ function errorPage(message, code) {
     '<div class="shell-entry-top"><div class="shell-brand">'+brand+'</div><span class="shell-entry-role">'+icon(entry.symbol,15)+entry.kind+'</span></div>'+
     '<h1 id="shell-entry-title">'+entry.title+'</h1><p class="shell-entry-hint">'+entry.hint+'</p>'+
     (message ? '<p class="shell-entry-error" role="alert">'+esc(message)+'</p>' : '')+
-    '<form id="entry-form"><label for="room-input">六位课堂码</label><input class="shell-entry-code" id="room-input" name="room" maxlength="6" minlength="6" pattern="[0-9A-Za-z]{6}" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC123" '+(needsPassphrase?'':'required ')+'value="'+esc(code || '')+'">'+
-    (needsPassphrase ? '<label for="passphrase-input">教师口令</label><input class="shell-entry-passphrase" id="passphrase-input" name="passphrase" type="password" autocomplete="current-password" placeholder="输入服务端配置的教师口令" value="'+esc(teacherPassphrase)+'" required>' : '')+
+    '<form id="entry-form"><label for="room-input">六位课堂码</label><input class="shell-entry-code" id="room-input" name="room" maxlength="6" minlength="6" pattern="[0-9A-Za-z]{6}" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC123" required value="'+esc(code || '')+'">'+
     '<button type="submit" class="action-primary shell-entry-submit"><span>'+entry.action+'</span>'+icon('arrow-right',17)+'</button></form>'+
     (role === 'teacher' ? '<div class="shell-entry-recovery">'+
         (recent ? '<button type="button" class="plain-button" data-entry-recent><span>返回上次课堂</span></button>' : '')+
-        '<button type="button" class="text-button shell-entry-reset"><span>创建新的排练室</span></button></div>' : '')+'</div></main>';
+        '<button type="button" class="text-button shell-entry-reset"><span>开启新课堂</span></button></div>' : '')+'</div></main>';
   const form = app.querySelector('#entry-form');
   const input = form.querySelector('#room-input');
-  const passInput = form.querySelector('#passphrase-input');
   const submit = form.querySelector('[type="submit"]');
   const reset = app.querySelector('.shell-entry-reset');
   const resume = app.querySelector('[data-entry-recent]');
-  function savePassphrase() {
-    if (!passInput) return;
-    teacherPassphrase = passInput.value.trim();
-    try { sessionStorage.setItem('polyphony.passphrase', teacherPassphrase); } catch { /* ignore */ }
-  }
   function submitEntry(target, room, button, pending) {
-    savePassphrase();
     form.setAttribute('aria-busy', 'true');
     input.readOnly = true;
-    if (passInput) passInput.readOnly = true;
     submit.disabled = true;
     if (reset) reset.disabled = true;
     if (resume) resume.disabled = true;
@@ -721,16 +790,25 @@ function errorPage(message, code) {
   }
   form.onsubmit = event => {
     event.preventDefault();
-    const roomVal = input.value.trim().toUpperCase();
-    submitEntry(view, roomVal || null, submit, '正在连接…');
+    submitEntry(view, input.value.trim().toUpperCase(), submit, '正在连接…');
   };
-  if (reset) reset.onclick = () => submitEntry('desk', null, reset, '正在创建…');
+  if (reset) reset.onclick = () => submitEntry('materials', null, reset, '正在打开…');
   if (resume) resume.onclick = () => submitEntry('desk', recent.code, resume, '正在返回…');
-  if (needsPassphrase && passInput) passInput.focus({ preventScroll:true });
-  else if (message) input.focus({ preventScroll:true });
+  if (message) input.focus({ preventScroll:true });
 }
 
-async function connect(v,code,claim=null) {
+function takeRemoteClaim(v) {
+  if (v !== 'remote') return null;
+  const url = new URL(location.href);
+  const claim = new URLSearchParams(url.hash.slice(1)).get('claim');
+  if (claim !== null) {
+    url.hash = '';
+    history.replaceState(null, '', url);
+  }
+  return claim;
+}
+
+async function connect(v,code,claim = takeRemoteClaim(v)) {
   const token=++generation;
   const role=roleFor(v);
   if (session) {
@@ -746,25 +824,25 @@ async function connect(v,code,claim=null) {
   if(role!=='teacher' && !code) {view=v;errorPage('',null);return;}
   if (!Object.hasOwn(lecturePages, v)) void preparePage(pages[v]).catch(() => {});
   try {
-    const next=await openSession({role,room:code,claim,passphrase:teacherPassphrase || undefined,demo:true,lessonId:'mzi'});
+    const request = passphrase => openSession({role,room:code,demo:false,lessonId:WORKSPACE_LESSON_ID,remote:v==='remote',claim,passphrase});
+    const next = role === 'teacher' && !code && v !== 'remote' ? await withTeacherPassphrase(request) : await request(teacherPassphrase);
     if(token!==generation) {next.close();return;}
-    activate(next,v,true);
-    if (claim) toast('已连接教师遥控权限');
+    activate(next,v,true,!!code && !readStorage('polyphony.workspace.pending.v1', []).includes(next.code));
   } catch(error) {if(token===generation){view=v;errorPage(localize(error),code);}}
 }
 
 window.addEventListener('popstate',()=>{
   const params=new URL(location.href).searchParams;
-  const v=Object.hasOwn(titles,params.get('view'))?params.get('view'):(params.has('room')?'desk':'materials');
+  const v = requestedView(params);
   const code=params.get('room');
-  const claim=params.get('claim');
+  const claim=takeRemoteClaim(v);
   labTab=params.get('tab');
-  if(session && session.code===code && roleFor(view)===roleFor(v) && !claim) {view=v;closeModal();paintShell();paintPage();}
+  if(!claim && session && session.code===code && roleFor(view)===roleFor(v) && (v!=='remote' || session.mode==='server')) {view=v;closeModal();paintShell();paintPage();}
   else connect(v,code,claim);
 });
 mobileShell.addEventListener('change', () => setRail(false));
 window.addEventListener('keydown', event => {
-  if (!railOpen && session?.state.lecture && view==='desk') lectureKeyboard?.(event,context());
+  if (!railOpen && session?.state.lecture && view==='desk') lectureKeyboard?.(event,context(),app.querySelector('#surface'));
   if (!railOpen) return;
   if (event.key === 'Escape') {
     event.preventDefault();
@@ -782,7 +860,22 @@ window.addEventListener('keydown', event => {
     first?.focus();
   }
 });
-window.addEventListener('pagehide',e=>{if(!e.persisted)session?.close();});
-const requestedRoom=query.get('room') || (roleFor(view)==='teacher' ? recentRooms()[0]?.code : null);
-const requestedClaim=query.get('claim');
-connect(view,requestedRoom,requestedClaim);
+window.addEventListener('pagehide', event => {
+  if (event.persisted) return;
+  clearPage();
+  session?.close();
+});
+function requestedView(params) {
+  const requested = params.get('view');
+  if ((requested === 'desk' || requested === 'replay') && !params.has('room')) return 'materials';
+  if (Object.hasOwn(titles, requested)) return requested;
+  return params.has('room') && !requested ? 'desk' : 'materials';
+}
+
+export function startApplication({ extension = null } = {}) {
+  teacherExtension = extension;
+  const query = new URL(location.href).searchParams;
+  view = requestedView(query);
+  labTab = query.get('tab');
+  void connect(view, query.get('room'));
+}

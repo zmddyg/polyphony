@@ -1,1084 +1,988 @@
-import { getLesson } from '../core/catalog.mjs';
 import { readPptx } from '../core/pptx-reader.mjs';
 import { readLegacySlides } from '../core/legacy-ppt.mjs';
-import { createMaterialNotebook, makeMaterialVersionId } from '../core/material-notebook.mjs';
-import { buildLectureScore } from '../core/lecture-score.mjs';
-import { challengeNames, rcDefaults } from '../core/challenge-lab.mjs';
-import { mountMaterialScience } from './material-science.mjs';
-import { renderMaterialNotes } from './material-notes.mjs';
-import { renderMaterialWorkshop } from './workshop.mjs';
+import { makeMaterialVersionId, createMaterialNotebook } from '../core/material-notebook.mjs';
+import { HARNESS_STAGES, createPageModule, dryRunLesson } from '../core/deck-harness.mjs';
+import { MODULE_MANIFESTS } from '../core/activities.mjs';
+import {
+  blockText, buildLectureScore, isEmbeddedLectureImage, lectureFrame, lectureSourceExcerpt, validateLectureScore,
+} from '../core/lecture-score.mjs';
+import { renderRichMathHtml } from '../core/math-render.mjs';
+import { redactProviderError } from '../core/lesson-provider.mjs';
+import { moduleHtml, bindModule } from './module-renderer.mjs';
+import { fitLectureSlide, fitPresentationContent, renderLectureFrame } from './lecture-stage.mjs';
+import { parseMarkdownDeck, inferBlocksFromPlainSlide } from '../core/slide-blocks.mjs';
+import { renderPageEditor, normalizeEditedLesson, normalizeEditedSlide, reanchorEditedLesson } from './page-editor.mjs';
+import { universalLessons } from '../core/universal-lessons.mjs';
 
-const imageData = /^data:image\/(?:png|jpeg|gif|webp|bmp);base64,/u;
-const supported = new Set(['ppt', 'pptx', 'pdf']);
-const activityTitles = {
-  mzi: '干涉仪的两个输出端',
-  blackbox: '数字黑箱',
-  history: '史料互证',
-  rc: 'RC 一阶电路',
-  inquiry: '概念辨析互动',
+const labels = {
+  'concept-diagnosis@1': '概念题',
+  'step-fault@1': '逐行找错',
+  'param-explorer@1': '参数实验',
+  'evidence-weighing@1': '证据讨论',
 };
-const planSources = { provider: '模型建议', jev: 'Jev 快速建议', local: '本地规则' };
-const supplementKinds = ['handout', 'science'];
-const noteLabels = { handout: '补充讲义', science: '理科讲解', classroom: '课堂互动', experiment: '课堂实验' };
-const experimentOptions = [
-  { kind: 'rc', title: challengeNames.rc, desc: '一阶 RC 故障排查：全班只有一次仪表测量机会，可继承本页理科模板的 R/C/V₀/V∞ 参数。' },
-  { kind: 'light', title: challengeNames.light, desc: '马赫–曾德尔干涉仪拟合与盲测挑战：用 3 个采样点拟合后选盲测角度验收。' },
-  { kind: 'blackbox', title: challengeNames.blackbox, desc: '数字黑箱规则检验：已知 0→0、2→4，全班投出一个输入数字尝试区分 x² 与 2x。' },
+const stages = {
+  ingest: '正在读取课件…', triage: '正在选择适合互动的页面…', synthesize: '正在生成课件内容…',
+  verify_repair: '正在检查题目与引用…', dryrun_compile: '正在试跑互动…',
+};
+const pageCounts = Array.from({ length: 43 }, (_, index) => index + 6);
+const toolBadges = {
+  search_media: ['🔎', 'search_media'],
+  plot_math_chart: ['📈', 'plot_math_chart'],
+  validate_math_and_diagram: ['∑', 'validate_math_and_diagram'],
+  lookup_reference: ['↗', 'lookup_reference'],
+  commit_slides: ['✓', 'commit_slides'],
+  revise_slide: ['✎', 'revise_slide'],
+  course_review: ['✨', '全卷自审'],
+  tool_protocol: ['⇄', '工具协议'],
+};
+const toolStatuses = { running: '调用中', success: '完成', error: '待修正', info: '记录' };
+const densities = [
+  ['sparse', '紧凑'],
+  ['balanced', '标准'],
+  ['dense', '高频'],
 ];
+const adaptationModes = [
+  ['preserve', '原页无损活化', '保留原页画面与顺序，在合适的页内加入互动。'],
+  ['enhance', '原页升级 + 插拓展页', '保留原页，在难点后插入公式梳理、流程图或诊断页。'],
+  ['rebuild', '重构为平台原生课件', '用原稿文字、公式、表格与关键插图重新编排。'],
+];
+const legacyKinds = new Set(['ppt', 'pptx', 'pdf', 'markdown', 'md', 'txt', 'text']);
+const defaultSettings = { pageCount: 10, density: 'balanced', pacingMode: 'stem-60s', enableWebImages: true };
+const workspace = {
+  material: null, result: null, index: 0, mode: 'import', message: '',
+  spec: { course: '', topic: '', ...defaultSettings },
+  adaptation: { ...defaultSettings },
+  retryPlan: null,
+  unfinishedRun: null,
+  visualEdits: {},
+  contentEdits: {},
+};
+let pendingSave = Promise.resolve();
 
-const pageLabel = (version, number) => `《${version.name}》第 ${number} 页`;
-const noteSource = (version, page) => ({
-  type: 'material-page', versionId: version.versionId, name: version.name, pageNumber: page.number,
-});
-const noteKey = (versionId, pageNumber, id) => JSON.stringify([versionId, pageNumber, id]);
-const plainLines = text => text.split(/\r\n?|\n/u).map(line => line.trim()).filter(Boolean);
-const isAdopted = note => note?.adoption && note.adoption.withdrawnAt == null;
-
-function isSafeMathML(markup) {
-  return typeof markup === 'string' &&
-    /^<math(?:\s[^<>]*)?>[\s\S]*<\/math>$/u.test(markup.trim()) &&
-    !/<(?:script|iframe|object|embed|style|link|img|svg|a)\b|on[a-z]+\s*=|javascript:/iu.test(markup);
-}
-
-function parsePastedPages(defaultTitle, rawText) {
-  const normalized = rawText.replace(/\r\n?/gu, '\n').trim();
-  const byRule = normalized.split(/\n[ \t]*-{3,}[ \t]*\n/u).map(chunk => chunk.trim()).filter(Boolean);
-  let sections = byRule;
-  if (sections.length === 1 && /^#\s+/mu.test(normalized)) {
-    const splitHeadings = normalized.split(/(?=^#\s+)/mu).map(chunk => chunk.trim()).filter(Boolean);
-    if (splitHeadings.length > 1) sections = splitHeadings;
-  }
-  if (sections.length <= 1) {
-    return [{ number: 1, title: defaultTitle, text: normalized, images: [] }];
-  }
-  return sections.map((chunk, idx) => {
-    const lines = chunk.split('\n');
-    const headingMatch = lines[0]?.match(/^#{1,3}\s+(.+)$/u);
-    const title = headingMatch ? headingMatch[1].trim().slice(0, 120)
-      : (lines[0]?.trim().slice(0, 80) || `${defaultTitle} · 第 ${idx + 1} 页`);
-    const body = headingMatch ? lines.slice(1).join('\n').trim() : chunk;
-    return { number: idx + 1, title, text: body || title, images: [] };
-  });
-}
-
-function importedMaterial(result, type, file, versionId) {
-  if (!result?.pages?.length) throw new Error('课件没有可读取的页。');
+function materialFromScore(score, versionId) {
   return {
-    ...result,
-    versionId,
-    name: file.name,
-    title: result.title || file.name.replace(/\.[^.]+$/u, ''),
-    file,
-    type,
-    pages: result.pages.map(page => ({
-      ...page,
-      preview: imageData.test(page.preview ?? '') ? page.preview : undefined,
-      images: (page.images ?? []).filter(figure => imageData.test(figure?.src ?? '')),
+    name: score.source.name, title: score.title, type: score.source.kind, versionId,
+    pages: score.pages.map(({ adopted, interaction, ...page }) => ({
+      ...page, text: page.body.length ? page.body.join('\n') : page.blocks?.map(blockText).join('\n') ?? '',
     })),
   };
 }
 
-function renderSource(version, page, e) {
-  const title = page.title || `第 ${page.number} 页`;
-  const embedded = page.preview ? [] : (page.images ?? []).filter(figure => figure.src !== page.preview);
-  const figures = embedded.length ? `<div class="mw-figures">${embedded.map(figure => `<img loading="lazy" src="${e(figure.src)}" alt="${e(figure.alt || figure.name || '原课件插图')}">`).join('')}</div>` : '';
-  const safeFormulas = page.preview ? [] : (page.formulas ?? []).filter(isSafeMathML);
-  const formulasMarkup = safeFormulas.length
-    ? `<div class="mw-formulas" aria-label="提取公式">${safeFormulas.map(math => `<div class="mw-formula">${math}</div>`).join('')}</div>`
-    : '';
-  let copy = '';
-  if (page.text && page.preview) {
-    copy = `<details class="mw-source-text"><summary>查看这页的原文</summary><p class="mw-extracted">${e(page.text)}</p></details>`;
-  } else if (!page.preview) {
-    const lines = (page.text ?? '').split(/\r\n?|\n/u);
-    if (lines[0]?.trim() === title) lines.shift();
-    const excerpt = lines.join('\n');
-    if (excerpt) copy = `<p class="mw-extracted">${e(excerpt)}</p>`;
-    else if (!page.text && !figures && !safeFormulas.length) copy = '<p class="mw-muted">这页没有可读取的文字或图片。</p>';
+function fromDraft(material, draft) {
+  if (!draft) return null;
+  for (const page of material.pages) {
+    page.speakerNotes = draft.speakerNotes?.[page.number] ?? page.speakerNotes ?? '';
+    Object.assign(page, draft.visuals?.[page.number]);
+    const content = draft.content?.[page.number];
+    if (content) Object.assign(page, content, {nativeBlocks: undefined, body: undefined});
   }
-  const sourceNote = figures ? '当前显示抽取的原文和可读取的插图。' : '当前按页显示抽取的原文。';
-  return `<section class="mw-paper" aria-labelledby="mw-source-title">
-    <div class="mw-source-header">
-      <p class="mw-source-ref">${e(pageLabel(version, page.number))}${page.hidden ? ' · 原课件隐藏页' : ''}</p>
-      <h2 id="mw-source-title" tabindex="-1">${e(title)}</h2>
-    </div>
-    ${page.preview ? `<img class="mw-preview" src="${e(page.preview)}" alt="${e(`原课件第 ${page.number} 页预览`)}">` : ''}
-    ${copy}
-    ${formulasMarkup}
-    ${figures}
-    ${!page.preview && (page.text || figures) && version.type !== 'text' ? `<p class="mw-source-note">${sourceNote}</p>` : ''}
-    ${page.warnings?.length ? `<details class="mw-source-text"><summary>这页的读取说明</summary><ul>${page.warnings.map(warning => `<li>${e(warning)}</li>`).join('')}</ul></details>` : ''}
-  </section>`;
+  return {
+    lectureScore: buildLectureScore(material, new Map(draft.adopted), {
+      title: draft.title, interactionsByPage: new Map(draft.interactions),
+    }),
+    harnessReceipt: draft.harnessReceipt,
+    source: draft.source,
+    retry: draft.retry,
+  };
 }
 
-function joinLecture(version, adopted) {
-  const supplements = new Map();
-  const interactionsByPage = new Map();
-  const experimentsByPage = new Map();
-  const sorted = [...adopted].sort((a, b) => (a.adoptedAt ?? 0) - (b.adoptedAt ?? 0));
-  for (const { pageNumber, kind, packet } of sorted) {
-    if (kind === 'classroom') interactionsByPage.set(pageNumber, packet.lesson ?? packet);
-    if (kind === 'experiment' && packet?.kind) {
-      experimentsByPage.set(pageNumber, { kind: packet.kind, ...(packet.params ? { params: packet.params } : {}) });
-    }
-    if (!supplementKinds.includes(kind)) continue;
-    if (!supplements.has(pageNumber)) supplements.set(pageNumber, { slides: [] });
-    supplements.get(pageNumber).slides.push(...packet.slides);
-  }
-  return buildLectureScore(version, supplements, { interactionsByPage, experimentsByPage });
+function mergePptxSources(rendered, original) {
+  if (!rendered) return original;
+  if (!original || original.pages.length !== rendered.pages.length) return rendered;
+  const originalPages = new Map(original.pages.map(page => [page.number, page]));
+  return {
+    ...rendered,
+    pages: rendered.pages.map(page => {
+      const source = originalPages.get(page.sourcePageNumber ?? page.number);
+      const hasVisibleImage = source?.images?.some(image => isEmbeddedLectureImage(image.cropped ? image.visibleSrc : image.src));
+      return {
+        ...page,
+        ...(source?.text.trim() && { text: source.text }),
+        ...(hasVisibleImage && { images: source.images }),
+        ...(!page.preview && isEmbeddedLectureImage(source?.preview) && { preview: source.preview }),
+      };
+    }),
+  };
 }
 
-function downloadJsonFile(data, filename) {
-  const href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-  const link = document.createElement('a');
-  link.href = href;
-  link.download = filename;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(href), 1000);
+function previewEntries() {
+  const compiled = new Map(workspace.result?.lectureScore.pages.map(page => [page.number, page.adopted]));
+  return (workspace.material?.pages ?? []).filter(page => !page.hidden).sort((a,b) => a.number-b.number).flatMap(page => [
+    { page },
+    ...(compiled.get(page.number) ?? []).map((supplement, supplementIndex) => ({ page, supplement, supplementIndex })),
+  ]);
+}
+
+const slideKey = ({page, supplementIndex}) => `${page.number}/${supplementIndex ?? ''}`;
+
+function adoptedSlides(result) {
+  return new Map(result?.lectureScore.pages.map(page => [page.number, { slides: page.adopted }]));
+}
+
+function pageInteractions(result) {
+  return new Map(result?.lectureScore.pages.filter(page => page.interaction).map(page => [page.number, page.interaction]));
 }
 
 export function renderMaterialWorkspace(root, ctx) {
-  const { esc: e, icon } = ctx;
+  const { esc: e } = ctx;
   const notebook = createMaterialNotebook();
-  const transientNotes = new Map();
-  const unsavedDrafts = new Map();
-  let version, page, notes = [], versions = [], stored = false;
-  let pageButtons, currentPageButton;
-  let operation = '', plan, panel = '', stopped = false, draftTimer, panelCleanup, notesCleanup;
-  let draftWrites = Promise.resolve();
-  let selection = 0;
-  let versionRequest = 0;
-  const active = () => !stopped && root.isConnected;
+  let stopped = false;
+  let busy = false;
+  let recent = null;
+  let failure = '';
+  let versions = [], receipt = null;
+  let activeWork, disposeEditor, disposePreview, paintFrame, paintedMaterial;
+  let streamPage, streamStamp, traceStamp, failuresStamp;
+  const contentDrafts = new Map(), activityPreviews = new Set();
+  let returnTarget = null;
+  try {const value=sessionStorage.getItem('polyphony.material.return');sessionStorage.removeItem('polyphony.material.return');if(value)returnTarget=JSON.parse(value);}catch {}
 
-  root.innerHTML = `<div class="mw-workspace" data-mw-dropzone>
-    <header class="mw-heading">
-      <div><h1>讲义备课</h1><p data-mw-heading-info>导入已有课件，按原页备课，在共演授课。</p></div>
-      <div class="mw-actions mw-heading-actions">
-        <button class="mw-button" type="button" data-mw-workshop>${icon('sparkles')}AI 备课工坊</button>
-        <button class="mw-button" type="button" data-mw-manage data-mw-lock>${icon('layers')}管理备课本</button>
-        <select aria-label="最近打开的课件" data-mw-recent hidden></select>
-        <button class="mw-button mw-primary" type="button" data-mw-start hidden>${icon('play')}在共演开始授课</button>
-      </div>
-    </header>
-    <p class="mw-status" role="status" aria-live="polite" data-mw-status></p>
-    <p class="mw-storage-warning" role="status" hidden data-mw-storage-warning>此浏览器暂时无法保存备课内容。当前页面仍可继续备课和授课。</p>
-    <div class="mw-body" data-mw-body></div>
-    <div data-mw-workshop-host hidden></div>
-    <input type="file" accept=".ppt,.pptx,.pdf,application/pdf" data-mw-file hidden>
-    <input type="file" accept=".json,application/json" data-mw-bundle-file hidden>
-    <dialog class="mw-dialog" aria-labelledby="mw-paste-title" data-mw-paste>
-      <form class="mw-form" data-mw-paste-form>
-        <h2 id="mw-paste-title">粘贴讲义内容</h2>
-        <p class="mw-muted">支持单页文本，也支持用单独一行的 <code>---</code> 或多段 <code># 标题</code> 自动拆分为多页讲义。</p>
-        <label>讲义名称 / 首页标题<input name="title" maxlength="150" required></label>
-        <label>正文内容<textarea name="text" rows="10" required placeholder="直接粘贴讲义文字，或用 --- 分隔不同页…"></textarea></label>
-        <div class="mw-actions">
-          <button class="mw-button" type="button" data-mw-paste-close>取消</button>
-          <button class="mw-button mw-primary" type="submit">导入讲义</button>
-        </div>
-      </form>
-    </dialog>
-    <dialog class="mw-dialog mw-manage-dialog" aria-labelledby="mw-manage-title" data-mw-manage-dialog>
-      <div class="mw-manage-head">
-        <h2 id="mw-manage-title">管理本地备课本</h2>
-        <button type="button" class="mw-plain" data-mw-manage-close aria-label="关闭">${icon('close', 18)}</button>
-      </div>
-      <p class="mw-muted">可将备课本（含全部原页、批注、理科例题与互动课谱）导出为 <code>.polyphony-notebook.json</code>，跨设备或换教室电脑一键迁移。</p>
-      <div class="mw-actions mw-manage-top-actions">
-        <button type="button" class="mw-button mw-primary" data-mw-bundle-import>${icon('plus', 16)}导入备课包 (.json)</button>
-      </div>
-      <div class="mw-manage-list" data-mw-manage-list></div>
-    </dialog>
-  </div>`;
-  const find = selector => root.querySelector(selector);
-  const workspace = find('[data-mw-dropzone]');
-  const body = find('[data-mw-body]');
-  const status = find('[data-mw-status]');
-  const recent = find('[data-mw-recent]');
-  const start = find('[data-mw-start]');
-  const fileInput = find('[data-mw-file]');
-  const bundleInput = find('[data-mw-bundle-file]');
-  const pasteDialog = find('[data-mw-paste]');
-  const manageDialog = find('[data-mw-manage-dialog]');
-  const manageList = find('[data-mw-manage-list]');
-  const workshopHost = find('[data-mw-workshop-host]');
-
-  function tell(message = '', error = false) {
-    if (!active()) return;
-    status.textContent = message;
-    status.classList.toggle('mw-status-error', error);
+  function announce(message) {
+    const status = root.querySelector('[data-prep-progress]');
+    if (status && !stopped) status.textContent = message;
   }
 
-  function renderRecent() {
-    recent.hidden = !versions.length;
-    recent.replaceChildren(new Option('最近课件', ''));
-    const names = new Map();
-    for (const { name } of versions) names.set(name, (names.get(name) ?? 0) + 1);
-    for (const item of versions) {
-      const label = names.get(item.name) > 1 ? `${item.name} · ${item.versionId.slice(7, 15)}` : item.name;
-      recent.add(new Option(label, item.versionId));
-    }
-    recent.disabled = Boolean(operation);
+  function progress(nextReceipt) {
+    if (stopped || activeWork?.signal.aborted) return;
+    receipt = nextReceipt;
+    const heading = root.querySelector('[data-harness-heading]');
+    if (heading) heading.innerHTML = harnessHeading();
+    const panel = root.querySelector('[data-harness-status]');
+    if (panel) panel.innerHTML = pipeline();
+    refreshAgentTools();
+    const stage = receipt.stages?.find(item => item.status === 'running');
+    const message = receipt.longHorizon?.message ?? (stage && stages[stage.id]);
+    if (message) announce(message);
   }
 
-  function renderManageList() {
-    if (!versions.length) {
-      manageList.innerHTML = '<p class="mw-muted">当前浏览器还没有已保存的备课本。</p>';
-      return;
-    }
-    manageList.innerHTML = `<ul class="mw-version-cards">${versions.map(item => `<li>
-      <div class="mw-version-info">
-        <strong>${e(item.name)}</strong>
-        <small>${item.pageCount ?? item.pageNumbers?.length ?? 0} 页 · ${e(item.type?.toUpperCase() || 'TEXT')}${version?.versionId === item.versionId ? ' · 当前打开' : ''}</small>
-      </div>
-      <div class="mw-actions">
-        <button type="button" class="mw-plain" data-manage-open="${e(item.versionId)}">打开</button>
-        <button type="button" class="mw-plain" data-manage-export="${e(item.versionId)}">${icon('download', 14)}导出</button>
-        <button type="button" class="mw-plain mw-danger-plain" data-manage-delete="${e(item.versionId)}">删除</button>
-      </div>
-    </li>`).join('')}</ul>`;
-  }
-
-  function busy(name = '') {
-    operation = name;
-    root.querySelectorAll('[data-mw-lock], [data-mw-start], [data-mw-recent]').forEach(control => {
-      control.disabled = Boolean(name);
-    });
-    if (!name && version && !version.pages.some(item => !item.hidden)) start.disabled = true;
-  }
-
-  async function refreshVersions() {
-    try {
-      versions = await notebook.listVersions();
-      if (active()) {
-        renderRecent();
-        if (manageDialog.open) renderManageList();
+  function persist(repaintLibrary = true) {
+    const { material, result } = workspace;
+    if (!material || !material.versionId || ctx.demonstration) return Promise.resolve();
+    const { material: originalForRetry, ...retryPlan } = workspace.retryPlan ?? {};
+    const draft = result ? {
+      title: result.lectureScore.title, source: result.source, harnessReceipt: result.harnessReceipt,
+      adopted: result.lectureScore.pages.filter(page => page.adopted.length).map(page => [page.number, { slides: page.adopted }]),
+      speakerNotes: Object.fromEntries(material.pages.map(page=>[page.number,page.speakerNotes ?? ''])),
+      interactions: result.lectureScore.pages.filter(page => page.interaction).map(page => [page.number, page.interaction]),
+      ...(result.retry && retryPlan.kind && { retry: result.retry, retryPlan }),
+      ...(Object.keys(workspace.visualEdits).length && { visuals: workspace.visualEdits }),
+      ...(Object.keys(workspace.contentEdits).length && { content: workspace.contentEdits }),
+    } : null;
+    const snapshot = { ...material, pages: material.pages.map(page => ({...page})), draft };
+    recent = { versionId: material.versionId, title: material.title };
+    const saved = pendingSave.then(() => notebook.saveVersion(snapshot));
+    pendingSave = saved.then(async () => {
+      const notes = await notebook.listNotes(material.versionId);
+      material.pageMemories = structuredClone(material.pageMemories ?? {});
+      for (const note of notes) {
+        const memories=material.pageMemories[note.pageNumber] ??= [];
+        if(!memories.some(item=>item.id===note.id))memories.push({ id: note.id, kind: note.kind, packet: note.packet });
       }
-    } catch { /* The open deck remains usable without recent files. */ }
-  }
-
-  function storeWarning() {
-    if (active()) find('[data-mw-storage-warning]').hidden = false;
-  }
-
-  function transientFor(versionId, number) {
-    return [...transientNotes.values()].filter(item => item.versionId === versionId && (number === undefined || item.pageNumber === number));
-  }
-
-  function mergePageNotes(versionId, number, persisted) {
-    const merged = new Map(persisted.map(note => [note.id, note]));
-    for (const note of transientFor(versionId, number)) merged.set(note.id, note);
-    for (const entry of unsavedDrafts.values()) {
-      if (entry.versionId === versionId && entry.pageNumber === number) {
-        merged.set(entry.note.id, { ...merged.get(entry.note.id), ...entry.note });
-      }
-    }
-    return [...merged.values()];
-  }
-
-  async function readNotes(versionId, number) {
-    let result = [];
-    try { result = await notebook.getPageNotes(versionId, number); } catch { /* The current page can use in-memory changes. */ }
-    return mergePageNotes(versionId, number, result);
-  }
-
-  async function saveNote(target, sourcePage, note, adopt = false) {
-    const versionId = target.versionId;
-    const pageNumber = sourcePage.number;
-    const key = noteKey(versionId, pageNumber, note.id);
-    const previous = transientNotes.get(key) ?? (await readNotes(versionId, pageNumber)).find(item => item.id === note.id);
-    const updatedAt = Date.now();
-    const next = {
-      ...previous,
-      ...note,
-      versionId,
-      pageNumber,
-      updatedAt,
-      adoption: adopt ? { packet: note.packet, source: note.source, adoptedAt: updatedAt } : previous?.adoption,
-    };
-    transientNotes.set(key, next);
-    try {
-      await notebook.savePageNote(versionId, pageNumber, note, { adopt });
-      if (transientNotes.get(key) === next) transientNotes.delete(key);
-    } catch { storeWarning(); }
-  }
-
-  async function seedSpeakerNotes(material) {
-    const withNotes = (material.pages ?? []).filter(item => typeof item.speakerNotes === 'string' && item.speakerNotes.trim());
-    if (!withNotes.length) return;
-    for (const item of withNotes) {
-      try {
-        const existing = await notebook.getPageNotes(material.versionId, item.number);
-        if (existing.some(entry => entry.kind === 'annotation')) continue;
-        await notebook.savePageNote(material.versionId, item.number, {
-          id: 'annotation',
-          kind: 'annotation',
-          packet: { text: item.speakerNotes.trim() },
-          source: { type: 'pptx-speaker-notes', pageNumber: item.number },
-        });
-      } catch { /* Ignore speaker note seed errors. */ }
-    }
-  }
-
-  function flushDrafts() {
-    clearTimeout(draftTimer);
-    draftTimer = undefined;
-    if (!unsavedDrafts.size) return draftWrites;
-    // Workshop inputs keep editing the same draft. Snapshot it before queuing the write.
-    const entries = Array.from(unsavedDrafts.values(), entry => ({ ...entry, note: structuredClone(entry.note) }));
-    unsavedDrafts.clear();
-    draftWrites = draftWrites.then(async () => {
-      for (const { target, sourcePage, note } of entries) await saveNote(target, sourcePage, note);
-    });
-    return draftWrites;
-  }
-
-  function queueDraft(target, sourcePage, note) {
-    const versionId = target.versionId;
-    const pageNumber = sourcePage.number;
-    unsavedDrafts.set(noteKey(versionId, pageNumber, note.id), { versionId, pageNumber, target, sourcePage, note });
-    if (version === target && page === sourcePage) {
-      const index = notes.findIndex(item => item.id === note.id);
-      if (index < 0) notes.push(note);
-      else notes[index] = { ...notes[index], ...note };
-    }
-    draftTimer ??= setTimeout(flushDrafts, 360);
-  }
-
-  async function readAdopted(versionId) {
-    let adopted = [];
-    try { adopted = await notebook.listAdopted(versionId); } catch { /* Include any changes kept for this page. */ }
-    const keyOf = item => noteKey(item.versionId, item.pageNumber, item.id);
-    const merged = new Map(adopted.map(item => [keyOf(item), item]));
-    for (const entry of transientFor(versionId)) {
-      if (isAdopted(entry)) merged.set(keyOf(entry), { ...entry, ...entry.adoption });
-      else merged.delete(keyOf(entry));
-    }
-    return [...merged.values()];
-  }
-
-  async function updatePageNotes() {
-    const opened = selection;
-    const updated = await readNotes(version.versionId, page.number);
-    if (!active() || opened !== selection) return;
-    notes = updated;
-    renderAdopted();
-  }
-
-  async function adoptNote(target, sourcePage, kind, packet, source = noteSource(target, sourcePage)) {
-    unsavedDrafts.delete(noteKey(target.versionId, sourcePage.number, kind));
-    await flushDrafts();
-    await saveNote(target, sourcePage, { id: kind, kind, packet, source }, true);
-    if (active() && version === target && page === sourcePage) await updatePageNotes();
-  }
-
-  async function withdrawNote(entry) {
-    const versionId = version.versionId;
-    const pageNumber = page.number;
-    const key = noteKey(versionId, pageNumber, entry.id);
-    await flushDrafts();
-    try {
-      await notebook.withdrawPageNote(versionId, pageNumber, entry.id);
-      transientNotes.delete(key);
-    } catch {
-      transientNotes.set(key, { ...entry, adoption: { ...entry.adoption, withdrawnAt: Date.now() } });
-      storeWarning();
-    }
-    if (active() && version.versionId === versionId && page.number === pageNumber) {
-      await updatePageNotes();
-    }
-  }
-
-  function renderEmpty() {
-    version = undefined;
-    page = undefined;
-    start.hidden = true;
-    find('[data-mw-workshop]').hidden = false;
-    find('[data-mw-heading-info]').textContent = '导入已有课件，按原页备课，在共演授课。';
-    body.innerHTML = `<section class="mw-empty" aria-labelledby="mw-empty-title">
-      <div class="mw-empty-icon">${icon('workshop', 30)}</div>
-      <h2 id="mw-empty-title">打开一份课件</h2>
-      <p>支持旧版 PowerPoint（.ppt）、.pptx 和 PDF；也可以直接将课件或 <code>.polyphony-notebook.json</code> 备课包拖入此处。</p>
-      <div class="mw-actions">
-        <button class="mw-button mw-primary" type="button" data-mw-upload data-mw-lock>${icon('plus')}导入课件</button>
-        <button class="mw-button" type="button" data-mw-paste-open data-mw-lock>粘贴讲义内容</button>
-        <button class="mw-button" type="button" data-mw-empty-bundle data-mw-lock>${icon('download')}导入备课包</button>
-      </div>
-      ${ctx.mode === 'server' ? '' : '<p class="mw-source-note">PDF 原页可通过启动共演本地服务导入。</p>'}
-    </section>`;
-    body.querySelector('[data-mw-upload]').onclick = () => fileInput.click();
-    body.querySelector('[data-mw-paste-open]').onclick = () => pasteDialog.showModal();
-    body.querySelector('[data-mw-empty-bundle]').onclick = () => bundleInput.click();
-  }
-
-  async function openVersion(versionId, number) {
-    if (operation) return;
-    const requested = ++versionRequest;
-    const result = await notebook.getVersion(versionId);
-    if (!active() || requested !== versionRequest) return;
-    if (!result) throw new Error('这份课件已不在最近记录里。');
-    displayVersion(result, true, number);
-  }
-
-  function displayVersion(next, saved, number) {
-    version = next;
-    stored = saved;
-    plan = undefined;
-    const count = version.pages.length;
-    find('[data-mw-heading-info]').textContent = `${version.name} · 原课件 ${count} 页`;
-    find('[data-mw-workshop]').hidden = true;
-    start.hidden = false;
-    start.disabled = Boolean(operation) || !version.pages.some(item => !item.hidden);
-    body.innerHTML = `
-      <section class="mw-plan" aria-labelledby="mw-plan-title" data-mw-plan></section>
-      <div class="mw-layout">
-        <aside class="mw-pages" aria-label="原课件页序">
-          <div class="mw-pages-heading"><h2>原课件</h2><button class="mw-plain" type="button" data-mw-replace data-mw-lock>换课件</button></div>
-          <ol class="mw-page-list" data-mw-page-list></ol>
-        </aside>
-        <div class="mw-selected" data-mw-selected></div>
-      </div>`;
-    find('[data-mw-replace]').onclick = () => fileInput.click();
-    renderPlan();
-    goToPage(number ?? version.lastPage ?? version.pages[0].number);
-  }
-
-  function renderPlan() {
-    const container = find('[data-mw-plan]');
-    if (!container) return;
-    const available = plan?.suggestions.filter(item => Object.hasOwn(activityTitles, item.kind) &&
-      version.pages.some(candidate => candidate.number === item.pageNumber && !candidate.hidden)) ?? [];
-    const fallbackCount = plan?.source === 'jev' && plan.modelPages < plan.scannedPages
-      ? ` · Jev 判读 ${plan.modelPages} 页，其余使用本地规则` : '';
-    container.innerHTML = `<div class="mw-plan-heading">
-        <div><h2 id="mw-plan-title">全课排课</h2>
-          <p>${plan ? e(`${planSources[plan.source] ?? planSources.local} · 检查了 ${plan.scannedPages} / ${plan.totalPages} 页${fallbackCount}`) : '从原课件中找适合补充讲解、概念辨析或加互动的页。'}</p></div>
-        <button class="mw-button" type="button" data-mw-plan-request data-mw-lock>${icon('sparkles')}${plan ? '重新获取建议' : '获取排课建议'}</button>
-      </div>
-      ${plan && !available.length ? '<p class="mw-plan-feedback">没有匹配到适合加互动或理科讲解的页。可以按原课件授课，也可以逐页备课。</p>' : ''}
-      ${available.length ? `<ul class="mw-suggestions">${available.map((item, index) => `<li>
-        <div><strong>${e(activityTitles[item.kind])}</strong><p>${e(item.reason)}</p></div>
-        <div class="mw-actions">
-          <button class="mw-plain" type="button" data-mw-suggestion-page="${index}" data-mw-lock>看第 ${item.pageNumber} 页</button>
-          <button class="mw-button" type="button" data-mw-suggestion="${index}" data-mw-lock>${item.kind === 'rc' ? '打开理科模板' : item.kind === 'inquiry' ? 'AI 生成本页互动' : '添加到这一页'}</button>
-        </div>
-      </li>`).join('')}</ul>` : ''}
-      ${version.warnings?.length ? `<details class="mw-import-warnings"><summary>课件读取说明</summary><ul>${version.warnings.map(warning => `<li>${e(warning)}</li>`).join('')}</ul></details>` : ''}`;
-    container.querySelector('[data-mw-plan-request]').onclick = async () => {
-      if (operation) return;
-      const target = version;
-      busy('plan');
-      tell('正在按页检查课件…');
-      try {
-        plan = await ctx.planLecture(target);
-        if (!active()) return;
-        renderPlan();
-        tell();
-        find('[data-mw-plan-request]').focus({ preventScroll: true });
-      } catch (error) {
-        tell(error?.message || '暂时无法获取排课建议，可以照常逐页备课。', true);
-      } finally {
-        busy();
-      }
-    };
-    container.querySelectorAll('[data-mw-suggestion-page]').forEach(button => {
-      button.onclick = () => goToPage(available[Number(button.dataset.mwSuggestionPage)].pageNumber, { focus: true });
-    });
-    container.querySelectorAll('[data-mw-suggestion]').forEach(button => {
-      button.onclick = async () => {
-        if (operation) return;
-        const item = available[Number(button.dataset.mwSuggestion)];
-        const target = version;
-        const sourcePage = target.pages.find(candidate => candidate.number === item.pageNumber);
-        if (item.kind === 'rc') {
-          goToPage(item.pageNumber, { tool: 'science', model: 'rc', focus: true });
-          return;
-        }
-        if (item.kind === 'inquiry') {
-          goToPage(item.pageNumber, { tool: 'classroom', focus: true });
-          return;
-        }
-        const lesson = getLesson(item.kind);
-        if (!lesson) return;
-        busy('adopt');
-        try {
-          const prior = (await readNotes(target.versionId, item.pageNumber)).find(entry => entry.kind === 'classroom');
-          await adoptNote(target, sourcePage, 'classroom', {
-            lesson,
-            workshopDraft: prior?.packet?.workshopDraft,
-          });
-          if (!active()) return;
-          goToPage(item.pageNumber, { focus: true });
-          tell(`已把「${activityTitles[item.kind]}」加入第 ${item.pageNumber} 页。`);
-        } catch (error) {
-          tell(error?.message || '添加互动失败，请重试。', true);
-        } finally {
-          busy();
-        }
-      };
-    });
-  }
-
-  function closePanels() {
-    panelCleanup?.();
-    notesCleanup?.();
-    panelCleanup = undefined;
-    notesCleanup = undefined;
-    panel = '';
-  }
-
-  function renderPageList() {
-    const list = find('[data-mw-page-list]');
-    if (!list.childElementCount) {
-      list.innerHTML = version.pages.map(item => `<li>
-        <button class="mw-page-choice" type="button" data-mw-page="${item.number}" data-mw-lock>
-          <span class="mw-page-number">${item.number}</span>
-          <span class="mw-page-name">${e(item.title || `第 ${item.number} 页`)}${item.hidden ? '<small>隐藏页</small>' : ''}</span>
-        </button>
-      </li>`).join('');
-      pageButtons = new Map(Array.from(list.querySelectorAll('[data-mw-page]'), button => [Number(button.dataset.mwPage), button]));
-      currentPageButton = undefined;
-      list.onclick = ({ target }) => {
-        const button = target.closest('[data-mw-page]');
-        if (button) goToPage(Number(button.dataset.mwPage), { focus: true });
-      };
-    }
-    const nextButton = pageButtons.get(page.number);
-    if (nextButton === currentPageButton) return;
-    currentPageButton?.removeAttribute('aria-current');
-    nextButton.setAttribute('aria-current', 'page');
-    currentPageButton = nextButton;
-  }
-
-  function goToPage(number, { tool, model, focus = false } = {}) {
-    if (!active() || !version) return;
-    const written = flushDrafts();
-    const nextPage = version.pages.find(item => item.number === number) ?? version.pages[0];
-    if (page === nextPage && !tool && !body.hidden && find('[data-mw-selected]')?.childElementCount) {
-      if (focus) focusPage();
-      return;
-    }
-    closePanels();
-    page = nextPage;
-    notes = [];
-    const target = version;
-    const current = ++selection;
-    body.hidden = false;
-    workshopHost.hidden = true;
-    workshopHost.replaceChildren();
-    find('.mw-heading').hidden = false;
-    renderPageList();
-    const selected = find('[data-mw-selected]');
-    selected.innerHTML = `
-      ${renderSource(version, page, e)}
-      ${page.hidden ? '<p class="mw-source-note">这页保留在备课记录中，放映时会跳过。</p>' : `<section class="mw-page-tools" aria-labelledby="mw-page-tools-title">
-        <div class="mw-page-tools-heading">
-          <h2 id="mw-page-tools-title">这一页的备课</h2>
-          <div class="mw-actions" role="group" aria-label="逐页备课">
-            <button class="mw-button" type="button" data-mw-tool="handout" data-mw-lock aria-expanded="false">${icon('plus')}补一页讲义</button>
-            <button class="mw-button" type="button" data-mw-tool="science" data-mw-lock aria-expanded="false">${icon('lab')}理科模板</button>
-            <button class="mw-button" type="button" data-mw-tool="experiment" data-mw-lock aria-expanded="false">${icon('target')}挂载课堂实验</button>
-            <button class="mw-button" type="button" data-mw-tool="classroom" data-mw-lock aria-expanded="false">${icon('sparkles')}备课堂互动</button>
-          </div>
-        </div>
-        <ul class="mw-adopted" aria-label="本页已安排的讲授内容" data-mw-adopted hidden></ul>
-        <div class="mw-tool-panel" data-mw-tool-panel hidden></div>
-      </section>`}
-      ${stored ? `<details class="mw-memory" data-mw-memory>
-        <summary>${icon('replay')}批注与课堂反馈</summary>
-        <div data-mw-memory-content></div>
-      </details>` : ''}
-    `;
-    selected.querySelectorAll('[data-mw-tool]').forEach(button => {
-      button.onclick = () => showTool(button.dataset.mwTool);
-    });
-    const memory = selected.querySelector('[data-mw-memory]');
-    if (memory) memory.ontoggle = () => {
-      if (!memory.isConnected || !memory.open) return;
-      notesCleanup?.();
-      notesCleanup = renderMaterialNotes(memory.querySelector('[data-mw-memory-content]'), {
-        notebook, version: target, pageNumber: nextPage.number,
-        classroom: ctx.getState?.() ?? ctx.state,
-        esc: e, goToPage,
-        openVersion: (id, destination) => openVersion(id, destination).catch(error => tell(error.message, true)),
-        onNotesChanged: (number, persisted) => {
-          notes = mergePageNotes(target.versionId, number, persisted);
-          renderAdopted();
-        },
-        onUseReason: reason => openWorkshop(reason),
-        goReplay: () => ctx.go('replay'),
-      });
-    };
-    if (focus) focusPage();
-    if (stored) void notebook.setLastPage(target.versionId, nextPage.number).catch(storeWarning);
-    void (async () => {
-      await written;
-      if (!active() || current !== selection) return;
-      await updatePageNotes();
-      if (active() && current === selection && tool) showTool(tool, model);
-    })();
-  }
-
-  function focusPage() {
-    const title = find('#mw-source-title');
-    title?.focus({ preventScroll: true });
-    title?.scrollIntoView({ block: 'nearest' });
-  }
-
-  function renderAdopted() {
-    const list = find('[data-mw-adopted]');
-    if (!list) return;
-    const adopted = notes.filter(note => isAdopted(note) && noteLabels[note.kind]);
-    list.hidden = !adopted.length;
-    list.innerHTML = adopted.map((note, index) => {
-      const packet = note.adoption.packet;
-      const title = packet.lesson?.title ?? packet.title ?? challengeNames[packet.kind] ?? noteLabels[note.kind];
-      return `<li><span>${e(noteLabels[note.kind])} · <strong>${e(title)}</strong></span>
-        <button class="mw-plain" type="button" aria-label="${e(`从授课移除「${title}」`)}" data-mw-withdraw="${index}" data-mw-lock>移除</button></li>`;
-    }).join('');
-    list.querySelectorAll('[data-mw-withdraw]').forEach(button => {
-      button.onclick = async () => {
-        button.disabled = true;
-        await withdrawNote(adopted[Number(button.dataset.mwWithdraw)]);
-      };
-    });
-  }
-
-  function showTool(kind, model) {
-    if (page.hidden) return;
-    if (kind === 'classroom') return void openWorkshop();
-    const host = find('[data-mw-tool-panel]');
-    if (!host) return;
-    panelCleanup?.();
-    panelCleanup = undefined;
-    panel = panel === kind && !model ? '' : kind;
-    host.hidden = !panel;
-    host.replaceChildren();
-    root.querySelectorAll('[data-mw-tool]').forEach(button => {
-      button.setAttribute('aria-expanded', String(button.dataset.mwTool === panel));
-    });
-    if (panel === 'handout') renderHandout(host);
-    if (panel === 'experiment') renderExperimentTool(host);
-    if (panel === 'science') {
-      const target = version;
-      const sourcePage = page;
-      panelCleanup = mountMaterialScience(host, {
-        anchor: { id: `${target.versionId}:${sourcePage.number}`, materialId: target.versionId, title: target.name, page: sourcePage.number },
-        model,
-        adoptedPacket: notes.find(note => note.kind === 'science' && isAdopted(note))?.adoption.packet,
-        onAdopt: async packet => {
-          await adoptNote(target, sourcePage, 'science', packet);
-          if (version === target && page === sourcePage) tell('已将理科讲解加入这一页。');
-        },
-      });
-    }
-  }
-
-  function renderExperimentTool(host) {
-    const target = version;
-    const sourcePage = page;
-    const existing = notes.find(note => note.kind === 'experiment' && isAdopted(note))?.adoption?.packet;
-    const adoptedRc = notes.find(note => note.kind === 'science' && isAdopted(note) && note.adoption.packet?.model === 'rc')?.adoption?.packet;
-    const inheritedParams = adoptedRc?.parameters ?? existing?.params ?? rcDefaults;
-    const selectedKind = existing?.kind ?? 'rc';
-    host.innerHTML = `<form class="mw-form mw-exp-form" data-mw-exp-form>
-      <p class="mw-muted">为原稿第 ${sourcePage.number} 页显式挂载一项课堂现场实验，授课时可直接点击底部实验按钮启动。</p>
-      <div class="mw-exp-options">${experimentOptions.map(opt => `<label class="mw-exp-card">
-        <input type="radio" name="kind" value="${e(opt.kind)}"${opt.kind === selectedKind ? ' checked' : ''}>
-        <div><strong>${e(opt.title)}</strong><p>${e(opt.desc)}</p></div>
-      </label>`).join('')}</div>
-      <div class="mw-exp-rc-note" data-exp-rc-note${selectedKind === 'rc' ? '' : ' hidden'}>
-        <strong>RC 故障台参数：</strong>
-        R = ${e(inheritedParams.resistanceKohm)} kΩ，C = ${e(inheritedParams.capacitanceNf)} nF，V₀ = ${e(inheritedParams.initialV)} V，V∞ = ${e(inheritedParams.finalV)} V
-        ${adoptedRc ? '（已自动同步本页采用的理科模板参数）' : '（如需自定义参数，可先在「理科模板」调整并采用）'}
-      </div>
-      <div class="mw-actions"><button class="mw-button mw-primary" type="submit" data-mw-lock>${icon('check')}挂载到此页</button></div>
-    </form>`;
-    const form = host.querySelector('[data-mw-exp-form]');
-    const rcNote = form.querySelector('[data-exp-rc-note]');
-    form.onchange = () => {
-      rcNote.hidden = form.elements.kind.value !== 'rc';
-    };
-    form.onsubmit = async event => {
-      event.preventDefault();
-      const kind = form.elements.kind.value;
-      const meta = experimentOptions.find(item => item.kind === kind);
-      if (!meta) return;
-      const packet = {
-        kind,
-        title: meta.title,
-        ...(kind === 'rc' ? { params: inheritedParams } : {}),
-      };
-      event.submitter.disabled = true;
-      try {
-        await adoptNote(target, sourcePage, 'experiment', packet);
-        if (version === target && page === sourcePage) tell(`已将「${meta.title}」挂载到第 ${sourcePage.number} 页。`);
-      } finally {
-        event.submitter.disabled = false;
-      }
-    };
-  }
-
-  function renderHandout(host) {
-    const target = version;
-    const sourcePage = page;
-    const existing = notes.find(note => note.kind === 'handout')?.packet.slides[0];
-    host.innerHTML = `<form class="mw-form" data-mw-handout>
-      <label>补页标题<input name="title" maxlength="150" required value="${e(existing?.title ?? `${sourcePage.title || `第 ${sourcePage.number} 页`} · 补充讲义`)}"></label>
-      <label>讲义内容<textarea name="text" rows="5" required>${e(existing?.body.join('\n'))}</textarea></label>
-      <div class="mw-actions"><button class="mw-button mw-primary" type="submit" data-mw-lock>${icon('check')}采用补页</button></div>
-    </form>`;
-    const form = host.querySelector('form');
-    const packet = () => {
-      const title = form.elements.title.value.trim();
-      return { title, slides: [{ title, body: plainLines(form.elements.text.value), source: pageLabel(target, sourcePage.number) }] };
-    };
-    form.oninput = () => queueDraft(target, sourcePage, {
-      id: 'handout', kind: 'handout', packet: packet(), source: noteSource(target, sourcePage),
-    });
-    form.onsubmit = async event => {
-      event.preventDefault();
-      const current = packet();
-      if (!current.title || !current.slides[0].body.length) return tell('请填写补页的标题和内容。', true);
-      event.submitter.disabled = true;
-      try {
-        await adoptNote(target, sourcePage, 'handout', current);
-        if (version === target && page === sourcePage) tell('已将补充讲义加入这一页。');
-      } finally {
-        event.submitter.disabled = false;
-      }
-    };
-  }
-
-  async function openWorkshop(reason) {
-    if (!page || page.hidden || body.hidden) return;
-    const target = version;
-    const sourcePage = page;
-    await flushDrafts();
-    const pageNotes = await readNotes(target.versionId, sourcePage.number);
-    if (!active() || version !== target || page !== sourcePage || body.hidden) return;
-    const saved = pageNotes.find(note => note.kind === 'classroom');
-    const old = saved?.packet?.workshopDraft;
-    const starter = saved?.packet?.lesson;
-    const draft = old ? structuredClone(old) : {
-      topic: (sourcePage.title || target.title).slice(0, 100),
-      goal: '根据本页材料做出判断，并说明判断依据。',
-      material: (sourcePage.text ?? '').trim().slice(0, 2200),
-      ...(starter ? { score: structuredClone(starter), source: 'imported' } : {}),
-      ...(starter && getLesson(starter.id) ? { reference: starter.id } : {}),
-    };
-    let source = saved?.source ?? noteSource(target, sourcePage);
-    if (reason?.reason) {
-      const excerpt = `课堂反馈（原话）\n${reason.reason}`;
-      if (!draft.material.includes(excerpt)) {
-        draft.material = [draft.material.slice(0, Math.max(0, 2198 - excerpt.length)).trim(), excerpt].filter(Boolean).join('\n\n').slice(0, 2200);
-      }
-      source = { ...noteSource(target, sourcePage), response: reason.source };
-      queueDraft(target, sourcePage, { id: 'classroom', kind: 'classroom', packet: { lesson: starter, workshopDraft: draft }, source });
-    }
-    const closeWorkshop = () => {
-      if (!active()) return;
-      void flushDrafts().then(updatePageNotes);
-      body.hidden = false;
-      find('.mw-heading').hidden = false;
-      workshopHost.hidden = true;
-      workshopHost.replaceChildren();
-      find('[data-mw-tool="classroom"]')?.focus({ preventScroll: true });
-    };
-    body.hidden = true;
-    find('.mw-heading').hidden = true;
-    workshopHost.hidden = false;
-    renderMaterialWorkshop(workshopHost, ctx, {
-      pageLabel: pageLabel(target, sourcePage.number),
-      draft,
-      onBack: closeWorkshop,
-      onChange: workshopDraft => queueDraft(target, sourcePage, {
-        id: 'classroom', kind: 'classroom', packet: { lesson: starter, workshopDraft }, source,
-      }),
-      onAdopt: async (lesson, workshopDraft) => {
-        await adoptNote(target, sourcePage, 'classroom', { lesson, workshopDraft }, source);
-        if (active() && version === target && page === sourcePage) {
-          closeWorkshop();
-          tell('已将互动课谱加入这一页。');
-        }
-      },
-    });
-    workshopHost.querySelector('h1').tabIndex = -1;
-    workshopHost.querySelector('h1').focus({ preventScroll: true });
-  }
-
-  async function importFile(file) {
-    const type = file.name.split('.').at(-1).toLowerCase();
-    if (!supported.has(type)) throw new Error('请选择 .ppt、.pptx 或 .pdf 文件。');
-    const bytes = await file.arrayBuffer();
-    const versionId = await makeMaterialVersionId({ name: file.name, bytes });
-    let previous;
-    try { previous = await notebook.getVersion(versionId); } catch { /* Reading the new deck still works. */ }
-    if (previous) {
-      // Upgrade offline-cached slides with server-rendered original previews when now online.
-      if (ctx.materialRendering && previous.type !== 'text' && previous.pages.some(item => !item.hidden && !item.preview)) {
-        try {
-          const rendered = await ctx.importMaterial(file);
-          const matchingPages = rendered?.pages?.length === previous.pages.length &&
-            rendered.pages.every((item, index) => item.number === previous.pages[index].number);
-          if (matchingPages) {
-            const upgraded = await notebook.updateDocumentPages(versionId, rendered.pages, rendered.warnings ?? previous.warnings);
-            return { material: upgraded, saved: true, upgraded: true };
-          }
-        } catch { /* Keep the cached notebook intact if rendering fails. */ }
-      }
-      return { material: previous, saved: true };
-    }
-    let result;
-    if (type === 'pptx') {
-      let parsedInBrowser = true;
-      try { result = await readPptx(file); }
-      catch (error) {
-        if (!ctx.materialRendering) throw error;
-        parsedInBrowser = false;
-        result = await ctx.importMaterial(file);
-      }
-      if (parsedInBrowser && ctx.materialRendering && result.pages.some(item => !item.hidden && !item.preview)) {
-        try {
-          const rendered = await ctx.importMaterial(file);
-          const matchingPages = rendered.pages.length === result.pages.length &&
-            rendered.pages.every((item, index) => item.number === result.pages[index].number);
-          if (matchingPages) {
-            result.pages = result.pages.map((item, index) => ({
-              ...item, preview: rendered.pages[index].preview || item.preview,
-            }));
-          } else {
-            result.warnings = [...(result.warnings ?? []), '原页图的页数或顺序与课件记录不一致，仍保留原课件页序。'];
-          }
-        } catch {
-          result.warnings = [...(result.warnings ?? []), '未能生成完整的原页图。按页显示已有的预览、原文和插图。'];
-        }
-      }
-    }
-    else if (ctx.mode === 'server') result = await ctx.importMaterial(file);
-    else if (type === 'ppt') {
-      result = readLegacySlides(new Uint8Array(bytes), { pageLimit: 100, textLimit: 12000 });
-      result.warnings = ['旧版 PowerPoint 在此处按页显示抽取的原文。'];
-      if (result.truncated) result.warnings.push('文件较大。部分原文或原页超出读取范围。');
-    } else throw new Error('请启动共演本地服务，再导入 PDF。也可以粘贴其中一页的原文。');
-    const saved = await storeVersion(importedMaterial(result, type, file, versionId));
-    if (saved.saved) await seedSpeakerNotes(saved.material);
+      await refreshLibrary(repaintLibrary);
+    }).catch(() => { /* The current deck stays available if browser storage cannot save it. */ });
     return saved;
   }
 
-  async function importNotebookFile(file) {
-    if (file.size > 64 * 1024 * 1024) throw new Error('备课包文件超过 64 MB 大小限制。');
-    let parsed;
-    try { parsed = JSON.parse(await file.text()); }
-    catch { throw new Error('无法解析 JSON 备课包文件。'); }
-    const imported = await notebook.importNotebook(parsed);
-    const loaded = await notebook.getVersion(imported.versionId);
-    if (!loaded) throw new Error('备课包导入后无法打开。');
+  function showMaterial(material, result = null, message = '', retryPlan = null) {
+    material = {...material, pages: material.pages.map(page => material.draft?.content?.[page.number]
+      ? page : inferBlocksFromPlainSlide(page))};
+    const visibleCount = material.pages.filter(page => !page.hidden).length;
+    const pageCount = Math.max(6, Math.min(48, visibleCount));
+    Object.assign(workspace, {
+      material, result, index: 0, message,
+      adaptation: { ...defaultSettings, pageCount },
+      retryPlan, unfinishedRun: null,
+      visualEdits: material.draft?.visuals ?? {},
+      contentEdits: material.draft?.content ?? {},
+    });
+    contentDrafts.clear();
+    activityPreviews.clear();
+    receipt=result?.harnessReceipt ?? null;
+    persist();
+  }
+
+  async function task(message, action, { cancellable = false, restoreFocus } = {}) {
+    if (busy) return;
+    const previousReceipt = receipt;
+    if (cancellable) {
+      activeWork = new AbortController();
+      receipt = null;
+      streamPage = undefined;
+    }
+    busy = true;
+    failure = '';
+    paint();
+    announce(message);
+    if (cancellable) root.querySelector('[data-cancel-authoring]')?.focus();
+    let cancelled = false;
+    try {
+      await action(activeWork?.signal);
+      cancelled = Boolean(activeWork?.signal.aborted);
+    } catch (error) {
+      cancelled = Boolean(activeWork?.signal.aborted);
+      if (!cancelled) failure = redactProviderError(error);
+    } finally {
+      busy = false;
+      activeWork = undefined;
+      if (cancelled) receipt = previousReceipt;
+      if (!stopped) {
+        paint();
+        if (cancelled) {
+          announce('已取消编排。');
+          if (restoreFocus) root.querySelector(restoreFocus)?.focus();
+        } else if (cancellable && !failure) {
+          const failed = currentReceipt()?.failures?.length ?? 0;
+          announce(failed ? `有 ${failed} 个编排环节待重试。` : '课件已编排完成。');
+        }
+      }
+    }
+  }
+
+  function options(selectValue, name) {
+    return `<label>互动节奏<select name="${name}" ${busy ? 'disabled' : ''}>
+      <option value="stem-60s" ${selectValue === 'stem-60s' ? 'selected' : ''}>短互动 · 约 1 分钟</option>
+      <option value="seminar-3m" ${selectValue === 'seminar-3m' ? 'selected' : ''}>讨论 · 约 3 分钟</option>
+    </select></label>`;
+  }
+
+  function authorSettings(spec, allowMedia = true) {
+    return `<div class="prep-settings-grid prep-author-settings">
+      <label>页数<select name="pageCount" ${busy ? 'disabled' : ''}>${pageCounts.map(n =>
+        `<option value="${n}" ${spec.pageCount === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      <label>互动密度<select name="density" ${busy ? 'disabled' : ''}>${densities.map(([value, label]) =>
+        `<option value="${value}" ${spec.density === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+      ${options(spec.pacingMode, 'pacingMode')}
+      ${allowMedia ? `<label class="prep-web-images">
+        <input type="checkbox" name="enableWebImages" ${spec.enableWebImages ? 'checked' : ''} ${busy ? 'disabled' : ''}>
+        <span>允许联网配图（开源科普图库）</span></label>` : ''}
+    </div>`;
+  }
+
+  function readSettings(form) {
+    const data = new FormData(form);
     return {
-      material: loaded,
-      saved: true,
-      message: `已导入备课包「${imported.name}」（${imported.pageCount} 页，${imported.noteCount} 条备课记录）。`,
+      pageCount: Number(data.get('pageCount')),
+      density: data.get('density'),
+      pacingMode: data.get('pacingMode'),
+      enableWebImages: data.has('enableWebImages'),
     };
   }
 
-  async function storeVersion(material) {
+  function longHorizon(progress) {
+    if (!progress?.message) return '';
+    const { batches = [], completedBatches = 0, batchCount = 0, message } = progress;
+    const labels = { pending: '等待', running: '编写中', complete: '已完成', fallback: '本地补全', failed: '待重试' };
+    return `<div class="harness-long-progress" data-long-horizon>
+      <p>${e(message)}</p>
+      ${batchCount ? `<progress value="${e(completedBatches)}" max="${e(batchCount)}" aria-label="写页批次完成进度"></progress>` : ''}
+      ${batches.length ? `<ol class="harness-batches">${batches.map(batch => {
+        const state = batch.fallback ? 'fallback' : batch.status;
+        const range = `${batch.startPage}–${batch.endPage} 页`;
+        const title = state === 'complete' && batch.source === 'local' ? '本地编排完成' : labels[state] ?? labels.pending;
+        return `<li data-batch-state="${e(state)}" title="${e(title)}"><span>${e(range)}</span></li>`;
+      }).join('')}</ol>` : ''}
+    </div>`;
+  }
+
+  function currentReceipt() {
+    if (receipt || activeWork) return receipt;
+    if (workspace.unfinishedRun) return workspace.unfinishedRun.result?.harnessReceipt;
+    return workspace.result?.harnessReceipt;
+  }
+
+  function retryTarget() {
+    if (workspace.unfinishedRun) return workspace.unfinishedRun;
+    if (workspace.retryPlan && workspace.result?.retry) return { plan: workspace.retryPlan, result: workspace.result };
+    return null;
+  }
+
+  function agentFailures(active) {
+    const failures = active?.failures ?? [];
+    const retry = retryTarget();
+    const error = busy ? '' : workspace.unfinishedRun?.error;
+    if (!failures.length && !error) return '';
+    const chapterRetry = !busy && Boolean(retry?.result?.retry);
+    return `<section class="prep-agent-failures" data-agent-failures aria-labelledby="agent-failures-title">
+      <header><h2 id="agent-failures-title">${failures.length ? '有页面待重试' : '编排请求失败'}</h2>
+        <button type="button" class="plain-button" data-retry-failed ${busy || !retry ? 'disabled' : ''}>${failures.length ? '🔄 重试失败页' : '🔄 重试编排'}</button></header>
+      ${error ? `<p role="alert">${e(error)}</p>` : ''}
+      ${failures.length ? `<ul>${failures.map(item => {
+        const numbers = item.pageNumbers ?? [];
+        const first = item.startPage ?? numbers.at(0);
+        const last = item.endPage ?? numbers.at(-1);
+        const label = first && last && first !== last ? `第 ${first}–${last} 页` : first ? `第 ${first} 页` : '当前编排';
+        const stageName = { blueprint: '规划蓝图', batch: '编写页面', enhance: '编写拓展页', interaction: '合成互动' }[item.stage];
+        return `<li><b>${e(stageName ? label + ' · ' + stageName : label)}</b><span>${e(item.reason)}</span>
+          ${chapterRetry && numbers.length && failures.length > 1 ? `<button type="button" class="text-button" data-retry-range="${e(numbers.join(','))}">${numbers.length === 1 ? '重试此页' : '重试此页段'}</button>` : ''}</li>`;
+      }).join('')}</ul>` : ''}
+    </section>`;
+  }
+
+  function renderToolTrace(events) {
+    return `<header><h3>Agent 工具调用轨迹</h3>${events.length ? `<small>${events.length} 条</small>` : ''}</header>
+      ${events.length ? `<ol data-tool-log tabindex="0" aria-label="工具调用详情">${events.toReversed().map(event => {
+        const [mark, tool] = Object.hasOwn(toolBadges, event.tool) ? toolBadges[event.tool] : ['·', event.tool];
+        const status = Object.hasOwn(toolStatuses, event.status) ? event.status : 'info';
+        return `<li data-tool-status="${status}"><span aria-hidden="true">${mark}</span><div>
+          <b>${e(tool)}</b>${event.detail ? `<small>${e(event.detail)}</small>` : ''}
+          <p>${e(event.summary)}</p></div><span class="harness-tool-state">${toolStatuses[status]}</span></li>`;
+      }).join('')}</ol>` : '<p class="harness-tool-empty">调用工具后在此显示查证、配图、绘图与校验结果。</p>'}`;
+  }
+
+  function refreshAgentTools() {
+    const active = currentReceipt();
+    const events = active?.toolEvents ?? [];
+    const trace = root.querySelector('[data-agent-tools]');
+    const traceKey = JSON.stringify(events);
+    if (trace && traceKey !== traceStamp) {
+      const previous = trace.querySelector('[data-tool-log]');
+      const scrollTop = previous?.scrollTop ?? 0;
+      const scrollHeight = previous?.scrollHeight ?? 0;
+      const focused = document.activeElement === previous;
+      trace.innerHTML = renderToolTrace(events);
+      const log = trace.querySelector('[data-tool-log]');
+      if (focused) log?.focus({ preventScroll: true });
+      if (log && scrollTop) log.scrollTop = scrollTop + log.scrollHeight - scrollHeight;
+      traceStamp = traceKey;
+    }
+    const failures = root.querySelector('[data-agent-failure-slot]');
+    const markup = agentFailures(active);
+    if (failures && markup !== failuresStamp) {
+      failures.innerHTML = markup;
+      failuresStamp = markup;
+    }
+    const slot = root.querySelector('[data-agent-preview-slot]');
+    const pages = activeWork || active?.failures?.length ? active?.previewPages ?? [] : [];
+    const selected = pages.find(page => page.number === streamPage) ?? pages.at(-1);
+    const streamKey = JSON.stringify([pages, selected?.number]);
+    if (!slot || streamKey === streamStamp) return;
+    streamStamp = streamKey;
+    slot.innerHTML = selected ? `<section class="prep-card prep-streaming" data-agent-live-pages>
+      <header><h2>已成稿预览</h2><span>${pages.length} 页</span></header>
+      <nav aria-label="已成稿页">${pages.map(page => `<button type="button" data-agent-preview-page="${e(page.number)}"
+        aria-label="第 ${e(page.number)} 页 ${e(page.title)}" aria-current="${page === selected ? 'page' : 'false'}">${e(page.number)}</button>`).join('')}</nav>
+      <div class="prep-stream-frame" data-agent-preview-frame></div>
+      ${selected.imageCount ? `<p class="prep-note">已内嵌 ${e(selected.imageCount)} 张配图，编排完成后可查看。</p>` : ''}
+    </section>` : '';
+    if (selected) renderLectureFrame(slot.querySelector('[data-agent-preview-frame]'),
+      { ...selected, pageNumber: selected.number }, { compact: true });
+  }
+
+  function memoriesFor(page) { return page.pageMemories ?? workspace.material?.pageMemories?.[page.number] ?? []; }
+  function memoryText(memory) {const data=memory.packet ?? memory;return String(data.reason ?? data.summary ?? data.note ?? data.misconception ?? JSON.stringify(data)).slice(0,500);}
+  function harnessHeading() {
+    const active = currentReceipt();
+    const waiting = active?.failures?.length || workspace.unfinishedRun?.error;
+    return `<div class="harness-head"><span class="harness-orbit">◉</span><div><h2>Agent Harness</h2><p>五阶段实时编排看板</p></div>
+      <span class="harness-ready">${activeWork ? '编排进行中' : waiting ? '待重试' : '准备就绪'}</span></div>
+      ${longHorizon(active?.longHorizon)}`;
+  }
+
+  function pipeline() {
+    const active = currentReceipt();
+    const compiled = workspace.result?.lectureScore.pages;
+    const pageTotal = compiled?.reduce((count, page) => count + 1 + page.adopted.length, 0);
+    const statuses = { complete: '验证通过', running: '正在处理', failed: '待重试' };
+    return `<ol class="harness-pipeline">${HARNESS_STAGES.map((stage, index) => {
+        const state = active?.stages?.find(entry => entry.id === stage.id)?.status ?? 'pending';
+        const repairs = stage.id === 'verify_repair' ? active?.repairs ?? [] : [];
+        return `<li data-stage="${stage.id}" data-state="${e(state)}"><span>${state === 'complete' ? '✓' : String(index + 1).padStart(2, '0')}</span>
+          <div><b>${e(stage.title)}</b><small>${statuses[state] ?? '等待编排'}</small>
+          ${repairs.map(r => `<p class="harness-repair">P${e(r.pageNumber ?? '—')} · ${e(r.beforeSummary ?? r.issue)} → ${e(r.afterSummary ?? '完成复验')}</p>`).join('')}</div><i></i></li>`;
+      }).join('')}</ol><div class="harness-summary">
+      <b>${compiled ? pageTotal + ' 页讲义 · ' + compiled.filter(page => page.interaction).length + ' 个互动' : '从任意课程出发'}</b>
+      <span>来源可追溯 · 单页容错 · 双轮预演</span></div>`;
+  }
+  function library() {
+    return `<section class="prep-card version-library" data-prep-library><h2>我的备课版本库</h2>${versions.length?versions.map(v=>`<div class="version-row"><div><b>${renderRichMathHtml(v.title || v.name)}</b><small>${v.pageCount} 页 · ${v.memoryCount ?? 0} 条记忆</small></div><button class="text-button" type="button" data-open-version="${e(v.versionId)}" ${busy?'disabled':''}>继续打开</button><button class="text-button" type="button" data-delete-version="${e(v.versionId)}" ${busy?'disabled':''}>删除版本</button></div>`).join(''):'<p class="prep-note">导入或生成课件后，会在本机保存可继续编辑的版本。</p>'}</section>`;
+  }
+  function resumeDraft() {
+    return recent ? `<div class="prep-recent"><button type="button" class="plain-button" data-resume-draft ${busy ? 'disabled' : ''}>继续上次备课</button><small>${renderRichMathHtml(recent.title)}</small></div>` : '';
+  }
+  async function refreshLibrary(repaint=true) {
+    const items=await notebook.listVersions();
+    versions=await Promise.all(items.map(async item=>({...item,memoryCount:(await notebook.listNotes(item.versionId)).length})));
+    recent=versions[0] ?? null;
+    if (repaint && !stopped && !busy) {
+      root.querySelector('[data-prep-library]').outerHTML = library();
+      const resume = root.querySelector('[data-prep-recent]');
+      if (resume) resume.innerHTML = resumeDraft();
+      wireLibrary();
+    }
+  }
+  async function openVersion(versionId,pageNumber) {
+    await pendingSave;
+    const material=await notebook.getVersion(versionId);
+    if(!material)throw Error('找不到这个备课版本。');
+    const notes=await notebook.listNotes(versionId);material.pageMemories ??= {};
+    for(const note of notes)(material.pageMemories[note.pageNumber] ??= []).push({id:note.id,packet:note.packet,kind:note.kind});
+    showMaterial(material, fromDraft(material, material.draft), '', material.draft?.retryPlan ?? null);
+    workspace.index = Math.max(0, previewEntries().findIndex(entry => entry.page.number === Number(pageNumber ?? material.lastPage)));
+  }
+
+  function startScreen() {
+    const spec = workspace.spec;
+    const { configured, fastConfigured } = ctx.providerSummary ?? {};
+    const canUseModel = configured || fastConfigured;
+    if (workspace.mode === 'native') {
+      return `<section class="prep-card"><div class="prep-card-head"><h2>AI 备课</h2><button class="text-button" data-source-mode="import" ${busy ? 'disabled' : ''}>改用导入课件</button></div>
+        <form class="prep-form" data-author-form>
+          <label>课程和授课对象<input name="course" placeholder="例如：大一软件技术基础" value="${e(spec.course)}" maxlength="300" required ${busy ? 'disabled' : ''}></label>
+          <label>本节课讲什么<textarea name="topic" rows="4" placeholder="填写主题、重难点或想讨论的问题" maxlength="8000" required ${busy ? 'disabled' : ''}>${e(spec.topic)}</textarea></label>
+          ${canUseModel ? '' : `<p class="prep-note">当前可生成本地备课框架。<button type="button" class="text-button" data-prep-provider ${busy ? 'disabled' : ''}>连接模型</button></p>`}
+          <div class="prep-options prep-native-settings">${authorSettings(spec)}</div>
+          <button class="action-primary prep-primary" type="submit" ${busy ? 'disabled' : ''}>生成课件</button>
+        </form></section>`;
+    }
+    return `<section class="prep-card prep-entry" data-upload-zone>
+      <div class="prep-entry-actions">
+        <button class="action-primary prep-primary" type="button" data-upload ${busy ? 'disabled' : ''}>导入课件</button>
+        <button class="plain-button prep-primary" type="button" data-source-mode="native" ${busy ? 'disabled' : ''}>AI 备课</button>
+      </div>
+      <p class="prep-note">拖入 PPT、PPTX、PDF、Markdown、TXT 或共演课件，也可以<button type="button" class="text-button" data-paste ${busy ? 'disabled' : ''}>粘贴 Markdown / 多页讲义</button>。</p>
+      <div data-prep-recent>${resumeDraft()}</div>
+    </section>`;
+  }
+
+  function receiptDetails(result) {
+    const receipt = result?.harnessReceipt;
+    if (!receipt) return '';
+    return `<details class="prep-options"><summary>生成详情</summary><ul>
+      ${receipt.stages.map(stage => `<li>${e(stage.title)}${stage.status === 'complete' ? ' · 完成' : ''}</li>`).join('')}
+      ${(receipt.repairs ?? []).map(repair => `<li>${repair.pageNumber ? '第 ' + repair.pageNumber + ' 页 · ' : ''}${repair.status === 'fallback' ? '已使用本地方案' : '已修复'} · ${e(repair.issue)}<p>${e(repair.beforeSummary ?? '原输出未通过校验')} → ${e(repair.afterSummary ?? '逐页复验通过')}</p></li>`).join('')}
+    </ul><button type="button" class="text-button" data-receipt>查看完整护栏回执</button></details>`;
+  }
+
+  function adaptationPanel(material, result) {
+    if (!legacyKinds.has(material.type) || result?.source === 'json-import' || result?.harnessReceipt?.adaptedPages?.length) return '';
+    return `<form class="prep-adaptation" data-adapt-material aria-labelledby="adaptation-heading">
+      <h3 id="adaptation-heading">原稿迁移方式</h3>
+      <details class="prep-options"><summary>编排设置</summary>${authorSettings(workspace.adaptation)}</details>
+      <div class="prep-adaptation-modes">${adaptationModes.map(([mode, title, summary]) =>
+        `<button type="submit" name="adaptationMode" value="${mode}" data-adaptation-mode="${mode}"
+          ${mode === 'preserve' ? 'data-run-harness' : ''} aria-label="${e(title)}" aria-describedby="adaptation-${mode}" ${busy ? 'disabled' : ''}>
+          <strong>${e(title)}</strong><span id="adaptation-${mode}">${e(summary)}</span>
+        </button>`).join('')}</div>
+    </form>`;
+  }
+
+  function previewScreen() {
+    const { material, result, index } = workspace;
+    const entries = previewEntries();
+    const supplements = entries.filter(entry => entry.supplement).length;
+    const interactions = pageInteractions(result);
+    const { page, supplement } = entries[index] ?? {};
+    const lesson = supplement ? null : interactions.get(page?.number);
+    const showActivity = Boolean(lesson && activityPreviews.has(slideKey(entries[index])));
+    return `<section class="prep-card prep-preview">
+      <header class="prep-preview-head"><div><h2>${renderRichMathHtml(result?.lectureScore.title ?? material.title)}</h2>
+        <p class="prep-note">${entries.length} 页${supplements ? ' · ' + supplements + ' 张拓展页' : ''}${interactions.size ? ' · ' + interactions.size + ' 个互动' : ''}</p></div>
+        <div class="prep-preview-actions"><button class="action-primary prep-primary" type="button" data-publish ${busy ? 'disabled' : ''}>开始上课</button>
+        <details class="prep-menu"><summary>更多</summary><div>
+          <button class="plain-button" type="button" data-export-deck ${busy ? 'disabled' : ''}>下载共演课件</button>
+          <button class="plain-button" type="button" data-new-draft ${busy ? 'disabled' : ''}>返回备课首页</button>
+        </div></details></div>
+      </header>
+      ${adaptationPanel(material, result)}
+      ${workspace.message ? '<p class="prep-note">' + e(workspace.message) + '</p>' : ''}
+      ${receiptDetails(result)}
+      <div class="prep-preview-grid">
+        <nav class="prep-page-list" aria-label="课件页">${entries.map(({page: original, supplement: extension}, i) =>
+          `<button type="button" data-page="${i}" ${extension ? 'data-supplemental' : ''} aria-current="${i === index ? 'page' : 'false'}" ${busy ? 'disabled' : ''}>
+            <span>${extension ? '↳' : original.number}</span><span><span data-prep-page-title>${renderRichMathHtml(extension?.title ?? original.title)}</span>
+            ${extension ? `<small class="prep-supplement-tag">原稿第 ${original.number} 页拓展</small>` : memoriesFor(original).length ? '<small class="page-memory-badge">🧠 往届记忆</small>' : ''}</span>
+            ${!extension && interactions.has(original.number) ? '<i aria-label="有互动"></i>' : ''}</button>`).join('')}</nav>
+        <div class="prep-slide">
+          ${page && !supplement && memoriesFor(page).length ? `<aside class="page-memory"><b>🧠 往届误区</b><p>${e(memoriesFor(page).map(memoryText).join("；"))}</p></aside>` : ''}
+          <div class="prep-slide-view">
+            <div class="prep-slide-toolbar"><h3>16:9 讲台预览</h3>
+              ${lesson ? `<button class="plain-button" type="button" data-preview-activity aria-pressed="${showActivity}">预览页内互动</button>` : ''}
+            </div>
+            <div class="native-canvas prep-slide-stage" data-surface-role="teacher"><div class="native-layout${showActivity ? ' has-inline-interaction' : ''}">
+              <div data-native-slide data-page-preview></div>
+              ${lesson ? `<aside class="native-inline" data-inline-widget ${showActivity ? '' : 'hidden'} aria-label="本页互动预览">
+                <div class="inline-content">
+                  <header class="inline-heading"><span>${e(labels[lesson.activityId] ?? '互动题')}</span><b>首轮 · R1</b></header>
+                  <p class="inline-prompt">${renderRichMathHtml(lesson.prompt)}</p>
+                  <div data-module-preview>${moduleHtml(lesson, {phase:'collect',round:1,responses:[]})}</div>
+                  ${lesson.activityId === 'step-fault@1' ? '' : '<div class="inline-choice-list">' + lesson.options.map(option =>
+                    `<div><b>${e(option.id)}</b> ${renderRichMathHtml(option.label)}</div>`).join('') + '</div>'}
+                </div>
+              </aside>` : ''}
+            </div></div>
+          </div>
+          ${page && !supplement ? `<details class="prep-options" open><summary>${lesson ? '本页互动 · ' + e(labels[lesson.activityId] ?? '互动题') : '给本页添加互动'}</summary>
+            <label>互动类型<select data-swap ${busy ? 'disabled' : ''}><option value="">无互动</option>
+              ${MODULE_MANIFESTS.map(item => `<option value="${item.id}" ${lesson?.activityId === item.id ? 'selected' : ''}>${e(labels[item.id])}</option>`).join('')}
+            </select></label>
+            ${lesson ? `<p class="prep-activity-prompt">${renderRichMathHtml(lesson.prompt)}</p>` : ''}
+          </details>` : ''}
+          ${page ? '<div data-page-editor></div>' : ''}
+        </div>
+      </div>
+    </section>`;
+  }
+
+  function previewFrame({page, supplement}) {
+    const frame = supplement ?? page, index = workspace.index;
     try {
-      return { material: await notebook.saveVersion(material), saved: true };
-    } catch {
-      storeWarning();
-      return { material, saved: false };
-    }
+      const compiled = lectureFrame(workspace.result?.lectureScore ?? buildLectureScore(workspace.material), index);
+      if (compiled) return compiled;
+    } catch { /* A preliminary import can still be reviewed before publishing it. */ }
+    return {...frame, body: frame.body ?? frame.text?.split(/\r?\n/u) ?? [],
+      blocks: frame.nativeBlocks ?? frame.blocks, pageNumber: page.number, source: {name: workspace.material.name}};
   }
 
-  async function runImport(read) {
-    if (operation) return false;
-    versionRequest += 1;
-    busy('import');
-    tell('正在读取课件…');
-    try {
-      const { material, saved, upgraded, message } = await read();
-      if (!active()) return false;
-      displayVersion(material, saved);
-      tell(message ?? (upgraded ? '已自动补齐高清原页预览，原有批注与备课记录完整保留。' : ''));
-      void refreshVersions();
-      return true;
-    } catch (error) {
-      tell(error?.message || '无法读取课件，请重新选择文件。', true);
-      return false;
-    } finally {
-      busy();
-    }
-  }
-
-  function handleIncomingFile(file) {
-    if (!file) return;
-    const ext = file.name.split('.').at(-1).toLowerCase();
-    if (ext === 'json') {
-      if (manageDialog.open) manageDialog.close();
-      void runImport(() => importNotebookFile(file));
-    } else {
-      void runImport(() => importFile(file));
-    }
-  }
-
-  fileInput.onchange = () => {
-    const [file] = fileInput.files;
-    fileInput.value = '';
-    handleIncomingFile(file);
-  };
-  bundleInput.onchange = () => {
-    const [file] = bundleInput.files;
-    bundleInput.value = '';
-    if (file) {
-      if (manageDialog.open) manageDialog.close();
-      void runImport(() => importNotebookFile(file));
-    }
-  };
-
-  let dragDepth = 0;
-  const onDragEnter = event => {
-    if (!event.dataTransfer?.types?.includes('Files')) return;
-    event.preventDefault();
-    dragDepth++;
-    workspace.classList.add('is-dragover');
-  };
-  const onDragOver = event => {
-    if (!event.dataTransfer?.types?.includes('Files')) return;
-    event.preventDefault();
-  };
-  const onDragLeave = () => {
-    dragDepth = Math.max(0, dragDepth - 1);
-    if (dragDepth === 0) workspace.classList.remove('is-dragover');
-  };
-  const onDrop = event => {
-    event.preventDefault();
-    dragDepth = 0;
-    workspace.classList.remove('is-dragover');
-    const file = event.dataTransfer?.files?.[0];
-    if (file && !operation) handleIncomingFile(file);
-  };
-  workspace.addEventListener('dragenter', onDragEnter);
-  workspace.addEventListener('dragover', onDragOver);
-  workspace.addEventListener('dragleave', onDragLeave);
-  workspace.addEventListener('drop', onDrop);
-
-  find('[data-mw-manage]').onclick = async () => {
-    await refreshVersions();
-    renderManageList();
-    manageDialog.showModal();
-  };
-  find('[data-mw-manage-close]').onclick = () => manageDialog.close();
-  find('[data-mw-bundle-import]').onclick = () => bundleInput.click();
-  manageList.onclick = async event => {
-    const openBtn = event.target.closest('[data-manage-open]');
-    if (openBtn) {
-      manageDialog.close();
-      try { await openVersion(openBtn.dataset.manageOpen); tell(); }
-      catch (error) { tell(error?.message || '无法打开课件。', true); }
-      return;
-    }
-    const exportBtn = event.target.closest('[data-manage-export]');
-    if (exportBtn) {
-      const id = exportBtn.dataset.manageExport;
-      exportBtn.disabled = true;
-      try {
-        const bundle = await notebook.exportNotebook(id);
-        const safeName = (bundle.versionMeta?.name || 'notebook').replace(/[\\/:*?"<>|]/g, '_');
-        downloadJsonFile(bundle, `${safeName}.polyphony-notebook.json`);
-        ctx.toast('已导出备课包');
-      } catch (error) {
-        tell(error?.message || '导出备课包失败。', true);
-      } finally {
-        exportBtn.disabled = false;
+  function mountPreview(entry, lesson) {
+    const slot = root.querySelector('[data-page-preview]');
+    const widget = root.querySelector('.prep-slide-stage [data-inline-widget]');
+    const stage = slot.closest('.prep-slide-stage');
+    const layout = slot.parentElement;
+    const toggle = root.querySelector('[data-preview-activity]');
+    const key = slideKey(entry);
+    const total = previewEntries().length;
+    let frame = previewFrame(entry), disposeModule;
+    const fit = () => {
+      fitLectureSlide(slot);
+      if (widget && !widget.hidden) {
+        const style = getComputedStyle(widget);
+        const height = widget.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) - 4;
+        fitPresentationContent(widget.querySelector('.inline-content'), height);
       }
-      return;
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(slot);
+    slot.addEventListener('load', fit, true);
+    function render(draft = contentDrafts.get(key)) {
+      let preview = frame;
+      if (draft) {
+        try {
+          const {title, blocks, archetype, text} = normalizeEditedSlide({...draft, title: draft.title.trim() || frame.title});
+          preview = {...frame, title, blocks, archetype, body: text.split(/\r\n?|\n/u)};
+        } catch (error) {
+          return error.message;
+        }
+      }
+      renderLectureFrame(slot, preview, {index: workspace.index, total});
+      if (lesson?.activityId === 'step-fault@1' && !widget.hidden) {
+        const code = slot.querySelector('.slide-code');
+        const artifact = widget.querySelector('.module-artifact');
+        if (code && artifact) {
+          const copy = artifact.cloneNode(true);
+          code.hidden = true;
+          copy.hidden = false;
+          copy.dataset.inlineStepArtifact = '';
+          code.after(copy);
+        }
+        if (artifact) artifact.hidden = Boolean(code);
+      }
+      fit();
     }
-    const deleteBtn = event.target.closest('[data-manage-delete]');
-    if (deleteBtn) {
-      const id = deleteBtn.dataset.manageDelete;
-      const meta = versions.find(item => item.versionId === id);
-      manageDialog.close();
-      const confirmed = await ctx.confirmDialog({
-        title: '删除本地备课本？',
-        message: `将永久删除「${meta?.name ?? id}」及其全部批注、补充讲义和互动课谱。建议删除前先导出备课包。`,
-        confirmLabel: '确认删除',
-        cancelLabel: '取消',
-        danger: true,
-      });
-      if (!confirmed) return;
-      try {
-        await notebook.deleteVersion(id);
-        if (version?.versionId === id) renderEmpty();
-        await refreshVersions();
-        ctx.toast('已删除本地备课本');
-      } catch (error) {
-        tell(error?.message || '删除备课本失败。', true);
+    if (widget) {
+      const bind = () => bindModule(widget.querySelector('[data-module-preview]'), lesson);
+      if (!widget.hidden) disposeModule = bind();
+      toggle.onclick = () => {
+        const showing = activityPreviews.has(key);
+        if (showing) activityPreviews.delete(key);
+        else activityPreviews.add(key);
+        widget.hidden = showing;
+        layout.classList.toggle('has-inline-interaction', !showing);
+        toggle.setAttribute('aria-pressed', String(!showing));
+        if (showing) disposeModule?.();
+        else disposeModule = bind();
+        render();
+      };
+    }
+    if (render()) render(null);
+    paintFrame = (current, {reread = false} = {}) => {
+      if (!current || slideKey(current) !== key || !stage.isConnected) return;
+      if (reread) frame = previewFrame(current);
+      return render();
+    };
+    return () => {
+      disposeModule?.();
+      observer.disconnect();
+      slot.removeEventListener('load', fit, true);
+      paintFrame = undefined;
+    };
+  }
+
+  function paint() {
+    disposePreview?.();
+    disposePreview = undefined;
+    disposeEditor?.();
+    disposeEditor = undefined;
+    const { material } = workspace;
+    const previousList = paintedMaterial === material && root.querySelector('.prep-page-list');
+    const listPosition = previousList ? { left: previousList.scrollLeft, top: previousList.scrollTop } : null;
+    paintedMaterial = material;
+    root.innerHTML = `<section class="prep-workspace v3-home"><header class="v3-page-heading"><div><h1>双源备课，同页共演。</h1><p>让原稿脉络与全班的思考，在同一页相遇。</p></div></header>
+      <div class="prep-work-status"><p class="prep-progress" data-prep-progress role="status"></p>
+        ${activeWork ? '<button type="button" class="plain-button" data-cancel-authoring>取消编排</button>' : ''}</div>
+      ${failure && failure !== workspace.unfinishedRun?.error ? `<p class="shell-entry-error" role="alert">${e(failure)}</p>` : ''}
+      <div data-agent-failure-slot></div>
+      <div class="v4-author-grid">
+        <div class="v4-source-column"><div data-agent-preview-slot></div>${startScreen()}${library()}</div>
+        <aside class="v3-harness" data-harness-panel><div data-harness-heading>${harnessHeading()}</div>
+          <section class="harness-tool-trace" data-agent-tools aria-label="Agent 工具调用轨迹"></section>
+          <div data-harness-status>${pipeline()}</div>
+        </aside>
+      </div>
+      ${material ? previewScreen() : ''}
+      <input type="file" accept=".ppt,.pptx,.pdf,.json,.md,.txt" data-file hidden>
+      <dialog class="overlay-dialog" data-paste-dialog aria-labelledby="paste-title"><form class="prep-form">
+        <h2 id="paste-title">粘贴 Markdown / 多页讲义</h2><p class="prep-note">可用 --- 或 ## 自动分页，支持代码、表格与公式。</p>
+        <label>标题<input name="title" maxlength="100" required></label>
+        <label>讲义正文<textarea name="text" rows="6" required></textarea></label>
+        <div class="prep-entry-actions"><button type="submit" class="action-primary">预览讲义</button><button type="button" class="plain-button" data-cancel>取消</button></div>
+      </form></dialog></section>`;
+    if (material) {
+      const entry = previewEntries()[workspace.index];
+      if (entry) {
+        const { page, supplement } = entry;
+        const key = slideKey(entry);
+        const lesson = supplement ? null : workspace.result?.lectureScore.pages.find(item => item.number === page.number)?.interaction;
+        disposePreview = mountPreview(entry, lesson);
+        if (!busy) {
+          disposeEditor = renderPageEditor(root.querySelector('[data-page-editor]'), {
+            page: supplement ?? page, pageNumber: page.number, lesson, esc: e, visualOnly: Boolean(supplement),
+            searchMedia: ctx.searchMedia,
+            slideDraft: contentDrafts.get(key),
+            onSlidePreview: draft => { contentDrafts.set(key, draft); return paintFrame?.(entry); },
+            onSaveSlide: content => updateSlide(entry, {content}),
+            onReviseSlide: ctx.reviseSlide,
+            onVisualChange: visuals => updateSlide(entry, {visuals}),
+            onRegenerate: payload => ctx.regeneratePage({...payload, page:{...payload.page, pageMemories:memoriesFor(page)}}),
+            onSave: ({lesson, speakerNotes}) => {
+              page.speakerNotes = speakerNotes;
+              updateLesson(page, lesson);
+              workspace.message = '本页已通过契约、引文与双轮预演验证，修改已保存。';
+              paint();
+            },
+          });
+        }
       }
     }
-  };
+    streamStamp = traceStamp = failuresStamp = undefined;
+    refreshAgentTools();
+    wire();
+    if (listPosition) root.querySelector('.prep-page-list')?.scrollTo(listPosition);
+  }
 
-  find('[data-mw-paste-close]').onclick = () => pasteDialog.close();
-  find('[data-mw-paste-form]').onsubmit = async event => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const title = form.elements.title.value.trim();
-    const text = form.elements.text.value.trim();
-    if (!title || !text) return;
-    pasteDialog.close();
-    const opened = await runImport(async () => {
-      const pages = parsePastedPages(title, text);
-      const bytes = new TextEncoder().encode(`${title}\n${text}`);
-      const versionId = await makeMaterialVersionId({ name: title, bytes });
-      return storeVersion({ name: title, title, versionId, type: 'text', pages });
+  async function importFile(file) {
+    await task('正在读取课件…', async () => {
+      const extension = file.name.split('.').at(-1).toLowerCase();
+      if (extension === 'json') {
+        if (file.size > 64 * 1024 * 1024) throw new Error('课件超过 64 MB。');
+        const lectureScore = validateLectureScore(JSON.parse(await file.text()));
+        for (const { interaction } of lectureScore.pages) if (interaction) dryRunLesson(interaction);
+        const versionId = await makeMaterialVersionId({ bytes: JSON.stringify(lectureScore) });
+        lectureScore.source.versionId = versionId;
+        showMaterial(materialFromScore(lectureScore, versionId), { lectureScore, source: 'json-import' });
+        return;
+      }
+      if (['md','txt'].includes(extension)) {
+        const content=await file.text();
+        const material=parseMarkdownDeck(file.name.replace(/\.[^.]+$/,''),content);
+        material.versionId=await makeMaterialVersionId({bytes:content});showMaterial(material);return;
+      }
+      if (!['ppt', 'pptx', 'pdf'].includes(extension)) throw new Error('请选择 PPT、PPTX、PDF、Markdown、TXT 或共演课件。');
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const versionId = await makeMaterialVersionId({ bytes });
+      let data;
+      if (ctx.mode === 'server' && (extension !== 'pptx' || ctx.materialRendering)) {
+        try { data = await ctx.importMaterial(file); }
+        catch (error) { if (extension === 'pdf') throw error; }
+      }
+      if (extension === 'pptx') {
+        try { data = mergePptxSources(data, await readPptx(file)); }
+        catch (error) { if (!data) throw error; }
+      }
+      if (!data && extension === 'ppt') data = await readLegacySlides(bytes);
+      if (!data) throw new Error('PDF 导入需要课堂服务。也可以粘贴讲义继续备课。');
+      showMaterial({ ...data, name: file.name, title: data.title || file.name, type: extension, versionId },
+        null, data.warnings?.join(' ') ?? '');
     });
-    if (opened) form.reset();
-  };
-  find('[data-mw-workshop]').onclick = () => ctx.go('workshop');
-  recent.onchange = async () => {
-    const { value } = recent;
-    recent.value = '';
-    if (!value || operation) return;
-    try { await openVersion(value); tell(); }
-    catch (error) { tell(error?.message || '无法打开最近课件。', true); }
-  };
-  start.onclick = async () => {
-    if (operation || !version) return;
-    busy('start');
-    const target = version;
-    tell('正在准备共演授课…');
-    try {
-      await flushDrafts();
-      const lecture = joinLecture(target, await readAdopted(target.versionId));
-      if (active()) await ctx.startLecture(lecture);
-    } catch (error) {
-      tell(error?.message || '未能开始授课，请重试。', true);
-    } finally {
-      busy();
-    }
-  };
+  }
 
-  renderEmpty();
-  const onVisibilityChange = () => {
-    if (document.visibilityState === 'hidden') void flushDrafts();
-  };
-  document.addEventListener('visibilitychange', onVisibilityChange);
-  window.addEventListener('pagehide', flushDrafts);
-  void (async () => {
-    await refreshVersions();
-    if (active() && !version && !operation && versions.length) {
-      try { await openVersion(versions[0].versionId); }
-      catch { /* An unavailable recent deck does not prevent import. */ }
+  function updateLesson(page, id) {
+    const { material, result } = workspace;
+    let next = id && typeof id === 'object' ? id : id ? createPageModule(page, id) : null;
+    if(typeof id === 'string' && id && next.activityId!==id){
+      const sample=structuredClone(universalLessons.find(item=>item.activityId===id));
+      next=normalizeEditedLesson(page,{...next,activityId:id,moduleConfig:sample.moduleConfig,options:sample.options,correctOptionId:sample.correctOptionId,quickReasons:sample.quickReasons,takeaway:sample.takeaway});
     }
-  })();
+    const map = pageInteractions(result);
+    if (next) {
+      dryRunLesson(next);
+      map.set(page.number, next);
+    } else {
+      map.delete(page.number);
+    }
+    workspace.result = {
+      ...result,
+      lectureScore: buildLectureScore(material, adoptedSlides(result), { title: result?.lectureScore.title, interactionsByPage: map }),
+    };
+    if (typeof id === 'string' && next && next.activityId !== id) workspace.message = '本页内容适合先用概念题检查理解。';
+    persist();
+  }
+
+  function updateSlide(entry, {content, visuals}) {
+    const { material, result } = workspace;
+    const { page, supplement, supplementIndex } = entry;
+    const original = supplement ?? page;
+    const changes = {...visuals};
+    const interactions = pageInteractions(result);
+    if (content) {
+      const editableBlocks = original.nativeBlocks ?? original.blocks ?? [];
+      const sameBlocks = JSON.stringify(editableBlocks) === JSON.stringify(content.blocks);
+      const originalText = original.text ?? original.body?.join('\n') ?? '';
+      const text = sameBlocks && content.blocks.length ? originalText || content.text : content.text;
+      const sourceExcerpt = lectureSourceExcerpt(original);
+      Object.assign(changes, content, {text, sourceExcerpt, nativeBlocks: undefined});
+      if (supplement) changes.body = text.split(/\r\n?|\n/u);
+      if (!supplement && (text !== originalText || !text && content.title !== original.title)) {
+        const lesson = reanchorEditedLesson({...page, ...changes}, interactions.get(page.number));
+        if (lesson) interactions.set(page.number, lesson);
+      }
+    }
+    const adopted = adoptedSlides(result);
+    let nextMaterial = material;
+    if (supplementIndex !== undefined) {
+      const slides = adopted.get(page.number).slides.map((slide, index) => index === supplementIndex ? { ...slide, ...changes } : slide);
+      adopted.set(page.number, { slides });
+    } else {
+      nextMaterial = { ...material, pages: material.pages.map(item => item === page ? { ...item, ...changes } : item) };
+    }
+    const lectureScore = buildLectureScore(nextMaterial, adopted, {
+      title: result?.lectureScore.title, interactionsByPage: interactions,
+    });
+    if (supplementIndex === undefined) {
+      Object.assign(page, changes);
+      if (visuals) workspace.visualEdits = {...workspace.visualEdits, [page.number]: visuals};
+      if (content) workspace.contentEdits = {...workspace.contentEdits, [page.number]: changes};
+    }
+    if (content) {
+      contentDrafts.delete(slideKey(entry));
+      const title = root.querySelector('[data-page][aria-current=page] [data-prep-page-title]');
+      if (title) title.innerHTML = renderRichMathHtml(content.title);
+    }
+    workspace.result = { ...result, lectureScore };
+    paintFrame?.(previewEntries()[workspace.index], {reread: true});
+    return persist(false).catch(() => { throw Error('本页预览已更新，浏览器保存草稿失败。请重试保存。'); });
+  }
+
+  async function runAuthoring(plan, signal, { resume = false, pageNumbers } = {}) {
+    const previous = resume ? retryTarget()?.result : null;
+    const inPlace = previous && previous === workspace.result && workspace.material?.versionId;
+    const current = inPlace ? previewEntries()[workspace.index] : null;
+    const options = {
+      signal, onStage: progress,
+      ...(previous?.retry && { retry: { ...previous.retry, lectureScore: previous.lectureScore, pageNumbers } }),
+    };
+    const { kind, settings, adaptationMode } = plan;
+    try {
+      let original, result;
+      if (kind === 'adapt') {
+        await pendingSave;
+        original = plan.material ?? await notebook.getVersion(plan.sourceVersionId);
+        signal.throwIfAborted();
+        if (!original) throw Error('找不到原稿版本，请重新导入原稿。');
+        result = await ctx.adaptMaterial(original, { ...settings, adaptationMode, ...options });
+      } else {
+        result = await ctx.authorDeck(plan.spec, options);
+      }
+      signal.throwIfAborted();
+      const score = result.lectureScore;
+      if (!score) {
+        workspace.unfinishedRun = { plan, result };
+        receipt = result.harnessReceipt;
+        return;
+      }
+      const nextRetry = result.retry ? plan : null;
+      if (original && original.versionId === workspace.material?.versionId &&
+          (adaptationMode === 'preserve' || (adaptationMode === 'enhance' && !result.harnessReceipt?.adaptedPages?.length))) {
+        Object.assign(workspace, { result, retryPlan: nextRetry, unfinishedRun: null, message: result.generationNote ?? '' });
+        receipt = result.harnessReceipt;
+        persist();
+        return;
+      }
+      const previousPages = previous?.lectureScore?.pages;
+      const samePageSet = inPlace && previousPages?.length === score.pages.length &&
+        previousPages.every((page, index) => page.number === score.pages[index].number);
+      let versionId = samePageSet ? inPlace : (original ? score.source.versionId : result.harnessReceipt?.contentDigest);
+      if (!/^sha256-[a-f0-9]{64}$/u.test(versionId ?? '') ||
+          (!samePageSet && (versionId === original?.versionId || versionId === inPlace))) {
+        versionId = await makeMaterialVersionId({ bytes: JSON.stringify(original ? [adaptationMode, score] : score) });
+      }
+      signal.throwIfAborted();
+      const derivative = adaptationMode === 'enhance'
+        ? { name: score.source.name, title: score.title, type: score.source.kind, versionId, pages: original.pages }
+        : materialFromScore(score, versionId);
+      const lectureScore = { ...score, source: { ...score.source, versionId } };
+      showMaterial(derivative, { ...result, lectureScore }, result.generationNote, nextRetry);
+      if (current) workspace.index = Math.max(0, previewEntries().findIndex(entry => slideKey(entry) === slideKey(current)));
+    } catch (error) {
+      signal.throwIfAborted();
+      workspace.unfinishedRun = { plan, result: previous, error: redactProviderError(error) };
+      receipt = previous?.harnessReceipt ?? null;
+      throw error;
+    }
+  }
+
+  function wireLibrary() {
+    root.querySelectorAll('[data-open-version]').forEach(button=>button.onclick=()=>void task('正在打开备课版本…',()=>openVersion(button.dataset.openVersion)));
+    root.querySelectorAll('[data-delete-version]').forEach(button=>button.onclick=()=>void task('正在删除备课版本…',async()=>{await pendingSave;await notebook.deleteVersion(button.dataset.deleteVersion);if(recent?.versionId===button.dataset.deleteVersion)recent=null;await refreshLibrary(false);}));
+    const resume = root.querySelector('[data-resume-draft]');
+    if (resume) resume.onclick = () => void task('正在打开上次备课…', () => openVersion(recent.versionId));
+  }
+
+  function wire() {
+    wireLibrary();
+    root.querySelectorAll('[data-receipt]').forEach(button=>button.onclick=()=>{const dialog=ctx.configureReceipt?.();if(dialog)return;const d=document.createElement('dialog');d.className='overlay-dialog';d.innerHTML='<h2>护栏自修回执</h2><pre>'+e(JSON.stringify(workspace.result?.harnessReceipt ?? receipt,null,2))+'</pre><button type="button">关闭</button>';root.append(d);d.querySelector('button').onclick=()=>d.remove();d.addEventListener('cancel',()=>d.remove());d.showModal();});
+    const click = (selector, action) => root.querySelector(selector)?.addEventListener('click', action);
+    click('[data-agent-preview-slot]', event => {
+      const button = event.target.closest('[data-agent-preview-page]');
+      if (!button) return;
+      streamPage = Number(button.dataset.agentPreviewPage);
+      refreshAgentTools();
+      root.querySelector(`[data-agent-preview-page="${streamPage}"]`)?.focus({ preventScroll: true });
+    });
+    click('[data-agent-failure-slot]', event => {
+      const button = event.target.closest('[data-retry-failed], [data-retry-range]');
+      const target = retryTarget();
+      if (!button || button.disabled || !target) return;
+      const pageNumbers = button.dataset.retryRange?.split(',').map(Number);
+      void task('正在重试编排…', signal => runAuthoring(target.plan, signal, { resume: true, pageNumbers }), {
+        cancellable: true, restoreFocus: '[data-retry-failed]',
+      });
+    });
+    click('[data-cancel-authoring]', event => {
+      event.currentTarget.disabled = true;
+      activeWork?.abort();
+      announce('正在取消编排…');
+    });
+    click('[data-upload]', () => root.querySelector('[data-file]').click());
+    root.querySelector('[data-file]').onchange = event => {
+      const file = event.target.files[0];
+      if (file) void importFile(file);
+    };
+    const upload = root.querySelector('[data-upload-zone]');
+    if (upload) {
+      upload.ondragover = event => event.preventDefault();
+      upload.ondrop = event => {
+        event.preventDefault();
+        if (event.dataTransfer.files[0]) void importFile(event.dataTransfer.files[0]);
+      };
+    }
+    root.querySelectorAll('[data-source-mode]').forEach(button => button.onclick = () => {
+      workspace.mode = button.dataset.sourceMode;
+      failure = '';
+      paint();
+      root.querySelector(workspace.mode === 'native' ? '[name=course]' : '[data-upload]')?.focus();
+    });
+    click('[data-prep-provider]', () => ctx.configureModel(paint));
+    const author = root.querySelector('[data-author-form]');
+    const saveSpec = () => {
+      const { course, topic } = author.elements;
+      workspace.spec = { course: course.value, topic: topic.value, ...readSettings(author) };
+    };
+    author?.addEventListener('input', saveSpec);
+    author?.addEventListener('submit', event => {
+      event.preventDefault();
+      saveSpec();
+      const plan = { kind: 'native', spec: { ...workspace.spec } };
+      void task('正在生成课件…', signal => runAuthoring(plan, signal), {
+        cancellable: true, restoreFocus: '[data-author-form] button[type=submit]',
+      });
+    });
+    const adaptation = root.querySelector('[data-adapt-material]');
+    adaptation?.addEventListener('input', () => { workspace.adaptation = readSettings(adaptation); });
+    adaptation?.addEventListener('submit', event => {
+      event.preventDefault();
+      const mode = event.submitter?.value ?? 'preserve';
+      workspace.adaptation = readSettings(adaptation);
+      const plan = {
+        kind: 'adapt', adaptationMode: mode, settings: { ...workspace.adaptation },
+        material: workspace.material, sourceVersionId: workspace.material.versionId,
+      };
+      void task('正在编排原稿…', signal => runAuthoring(plan, signal), {
+        cancellable: true, restoreFocus: `[data-adaptation-mode="${mode}"]`,
+      });
+    });
+    root.querySelectorAll('[data-page]').forEach(button => button.onclick = () => {
+      workspace.index = Number(button.dataset.page);
+      const versionId = workspace.material.versionId;
+      const pageNumber = previewEntries()[workspace.index].page.number;
+      void pendingSave.then(() => notebook.setLastPage(versionId, pageNumber)).catch(() => {});
+      paint();
+      root.querySelector(`[data-page="${workspace.index}"]`)?.focus({ preventScroll: true });
+    });
+    root.querySelector('[data-swap]')?.addEventListener('change', event => {
+      try {
+        const current = previewEntries()[workspace.index].page;
+        current.speakerNotes=root.querySelector('[data-speaker-notes]')?.value ?? current.speakerNotes;
+        updateLesson(current, event.target.value);
+        failure = '';
+      } catch (error) {
+        failure = error.message;
+      }
+      paint();
+      const select = root.querySelector('[data-swap]');
+      select.closest('details').open = true;
+      select.focus({ preventScroll: true });
+    });
+    click('[data-new-draft]', () => {
+      Object.assign(workspace, {
+        material: null, result: null, index: 0, mode: 'import', message: '', retryPlan: null, unfinishedRun: null,
+        visualEdits: {}, contentEdits: {},
+      });
+      contentDrafts.clear();
+      activityPreviews.clear();
+      receipt = null;
+      failure = '';
+      paint();
+    });
+    click('[data-publish]', () => void task('正在开课…', () =>
+      ctx.startLecture(workspace.result?.lectureScore ?? buildLectureScore(workspace.material))));
+    click('[data-export-deck]', () => {
+      try {
+        const score = workspace.result?.lectureScore ?? buildLectureScore(workspace.material);
+        const url = URL.createObjectURL(new Blob([JSON.stringify(score, null, 2)], { type: 'application/json' }));
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = '共演-' + score.title.slice(0, 60).replace(/[\\/:*?"<>|]/g, '_') + '.json';
+        anchor.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } catch (error) {
+        failure = error.message;
+        paint();
+      }
+    });
+    const paste = root.querySelector('[data-paste-dialog]');
+    click('[data-paste]', () => paste.showModal());
+    click('[data-cancel]', () => paste.close());
+    paste.querySelector('form').onsubmit = event => {
+      event.preventDefault();
+      const data = new FormData(event.currentTarget);
+      const title = String(data.get('title')).trim();
+      const text = String(data.get('text')).trim();
+      if (!title || !text) return;
+      paste.close();
+      void task('正在读取讲义…', async () => {
+        const versionId = await makeMaterialVersionId({ bytes: title + '\n' + text });
+        showMaterial({ ...parseMarkdownDeck(title,text), versionId });
+      });
+    };
+  }
+
+  paint();
+  void refreshLibrary().catch(()=>{});
+  if(returnTarget?.versionId)void task('正在打开对应原页…',()=>openVersion(returnTarget.versionId,returnTarget.pageNumber));
   return () => {
     stopped = true;
-    closePanels();
-    workspace.removeEventListener('dragenter', onDragEnter);
-    workspace.removeEventListener('dragover', onDragOver);
-    workspace.removeEventListener('dragleave', onDragLeave);
-    workspace.removeEventListener('drop', onDrop);
-    document.removeEventListener('visibilitychange', onVisibilityChange);
-    window.removeEventListener('pagehide', flushDrafts);
-    void flushDrafts();
+    activeWork?.abort();
+    disposePreview?.();
+    disposeEditor?.();
   };
 }

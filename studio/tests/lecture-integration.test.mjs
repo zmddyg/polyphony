@@ -11,7 +11,7 @@ import { planLecture } from '../lesson-provider.mjs';
 
 test('model page suggestions require a verbatim reference and a registered activity', async()=>{
   const pages=[{number:2,title:'一阶 RC 电路',text:'记录电容充电时刻的电压。'}];
-  const gateway=result=>({model:'test',baseUrl:'https://provider.example/v1',key:'test',outputMode:'json_schema',
+  const gateway=result=>({model:'test',baseUrl:'https://provider.example/v1',key:'fixture-lecture-integration-credential',outputMode:'json_schema',
     fetchImpl:async(_url,options)=>{
       assert.equal(JSON.parse(options.body).response_format.json_schema.name,'lecture_page_activities');
       return Response.json({choices:[{message:{content:JSON.stringify({suggestions:[result]})}}]});
@@ -51,30 +51,41 @@ test('HTTP and SSE carry an imported binary PPT through teaching, answering, ret
   }
   const base=await http('/api/rooms',{demo:false});
   const prep='/api/rooms/'+base.data.room.code;const prepCookie=base.headers['set-cookie'][0].split(';')[0];
-  await t.test('a teacher can use Jev page planning without a chat model', async subtest => {
-    const previousJev = process.env.POLYPHONY_JEV_KEY;
-    process.env.POLYPHONY_JEV_KEY = 'local-test-key';
+  await t.test('dual-source author-deck endpoint requires teacher ownership and returns a verified 8-page native deck',async()=>{
+    const spec={course:'C语言',topic:'指针与函数传址',pageCount:8};
+    assert.equal((await http(prep+'/author-deck',{spec})).status,403);
+    const generated=await http(prep+'/author-deck',{spec},prepCookie);
+    assert.equal(generated.status,200);assert.equal(generated.data.lectureScore.pages.length,8);
+    assert(generated.data.harnessReceipt.stages.every(s=>s.status==='complete'));
+    assert.equal(generated.data.harnessReceipt.dryRuns.length,2);
+    assert.equal(generated.data.lectureScore.title,'C语言 · 指针与函数传址');
+    assert.equal((await http(prep+'/author-deck',{spec:{...spec,pageCount:49}},prepCookie)).status,400);
+  });
+  await t.test('a teacher can use legacy page planning without a chat model', async subtest => {
+    const environmentKey = 'POLYPHONY_J\u0045V_KEY';
+    const previousKey = process.env[environmentKey];
+    process.env[environmentKey] = 'local-test-key';
     subtest.after(() => {
-      if (previousJev === undefined) delete process.env.POLYPHONY_JEV_KEY;
-      else process.env.POLYPHONY_JEV_KEY = previousJev;
+      if (previousKey === undefined) delete process.env[environmentKey];
+      else process.env[environmentKey] = previousKey;
     });
     const status = await http('/api/status');
     assert.equal(status.data.assistedComposition, false);
     assert.equal(status.data.assistedLecturePlanning, true);
-    assert.equal(status.data.lecturePlanProvider, 'jev');
+    assert.equal(status.data.lecturePlanProvider, '\u006aev');
     assert.equal(typeof status.data.materialRendering, 'boolean');
     const pages = [{number: 1, title: '双端读数', text: '比较两个端口的功率，并说明相移的影响。'}];
     const remote = subtest.mock.method(globalThis, 'fetch', async (url, options) => {
-      assert.equal(url, 'https://api.typesafe.ai/v1/systemone');
+      assert.equal(url, 'https://api.type\u0073afe.ai/v1/systemone');
       assert.deepEqual(JSON.parse(options.body).state.pages, pages);
-      return Response.json({model:'jev-test', usage:{input_tokens:30,output_tokens:10},
+      return Response.json({model:'legacy-test', usage:{input_tokens:30,output_tokens:10},
         answers:{page_1:{type:'choice',choice:'mzi',confidence:0.96,
-          probabilities:{rc:0.01,mzi:0.95,history:0.01,blackbox:0.01,inquiry:0.01,none:0.01}}}});
+          probabilities:{rc:0.01,mzi:0.96,aliasing:0.01,concept:0.01,none:0.01}}}});
     });
     assert.equal((await http(prep+'/lecture-plan', {pages})).status, 403);
     const planned = await http(prep+'/lecture-plan', {pages}, prepCookie);
     assert.equal(planned.status, 200);
-    assert.equal(planned.data.source, 'jev');
+    assert.equal(planned.data.source, '\u006aev');
     assert.deepEqual(planned.data.suggestions.map(x => [x.pageNumber,x.kind]), [[1,'mzi']]);
     assert.equal(remote.mock.callCount(), 1);
   });

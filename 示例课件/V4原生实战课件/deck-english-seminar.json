@@ -1,0 +1,1070 @@
+{
+  "format": "polyphony.lecture",
+  "version": 1,
+  "title": "大学英语 Unit 4：实证阅读、学术审慎语与思辨交锋",
+  "source": {
+    "name": "大学英语 Unit 4：实证阅读、学术审慎语与思辨交锋",
+    "kind": "native",
+    "versionId": "sha256-6f413add18b4989245a95cd7465c8328a5497dfc63140e75c2fadbb9b54aec4f"
+  },
+  "pages": [
+    {
+      "id": "page-1",
+      "number": 1,
+      "title": "Unit 4 · Beyond Stereotypes",
+      "body": [
+        "Reading Empirical Studies Critically",
+        "Read: distinguish observations, explanations and generalizations.",
+        "Write: calibrate claims with hedging and precise collocations.",
+        "Debate: cite evidence, challenge the warrant, acknowledge a limitation.",
+        "Flipped-classroom agenda",
+        "Before class: annotate one claim and its evidence.",
+        "In class: independent vote → reason capsule → targeted discussion → revised answer.",
+        "After class: write a compare-and-contrast paragraph using the unlocked review cards.",
+        "数据来源声明",
+        "本套为原创 Unit 4 主题研讨材料，不冒充某版教材原文。P2的2,000人、P6的10,287篇及全部统计值均为课堂模拟，用于练习读表和论证。"
+      ],
+      "source": {
+        "name": "大学英语 Unit 4：实证阅读、学术审慎语与思辨交锋",
+        "pageNumber": 1
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "bullets",
+          "title": "Reading Empirical Studies Critically",
+          "items": [
+            "Read: distinguish observations, explanations and generalizations.",
+            "Write: calibrate claims with hedging and precise collocations.",
+            "Debate: cite evidence, challenge the warrant, acknowledge a limitation."
+          ]
+        },
+        {
+          "type": "steps",
+          "title": "Flipped-classroom agenda",
+          "items": [
+            "Before class: annotate one claim and its evidence.",
+            "In class: independent vote → reason capsule → targeted discussion → revised answer.",
+            "After class: write a compare-and-contrast paragraph using the unlocked review cards."
+          ]
+        },
+        {
+          "type": "callout",
+          "title": "数据来源声明",
+          "text": "本套为原创 Unit 4 主题研讨材料，不冒充某版教材原文。P2的2,000人、P6的10,287篇及全部统计值均为课堂模拟，用于练习读表和论证。",
+          "tone": "warning"
+        }
+      ],
+      "speakerNotes": "先让两位学生读出同一句观察和解释，请全班找出哪一句可直接从表里看到。提醒今天所有数字都是供练习的模拟样本。"
+    },
+    {
+      "id": "page-2",
+      "number": 2,
+      "title": "Reading 1 · Consumer Behaviour: What Do the Data Say?",
+      "body": [
+        "Simulated survey · N=2,000 (A:1,000 / B:1,000)",
+        "Measure",
+        "Group A",
+        "Group B",
+        "What it cannot establish",
+        "Median time per purchase",
+        "24 min",
+        "31 min",
+        "Innate ability / causal mechanism",
+        "Compared ≥3 sellers",
+        "62%",
+        "49%",
+        "Quality of each comparison",
+        "Self-reported return rate",
+        "8%",
+        "12%",
+        "Population-wide individual ranking",
+        "Describe, then qualify",
+        "In this sample, the median time was seven minutes lower in group A.",
+        "The proportion comparing at least three sellers was 13 percentage points higher.",
+        "Self-report, sampling, product mix and income may affect these estimates.",
+        "Evidence boundary",
+        "Invented teaching dataset. No confidence intervals or random assignment are supplied; do not claim causation or statistical significance."
+      ],
+      "source": {
+        "name": "大学英语 Unit 4：实证阅读、学术审慎语与思辨交锋",
+        "pageNumber": 2
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "table",
+          "title": "Simulated survey · N=2,000 (A:1,000 / B:1,000)",
+          "headers": [
+            "Measure",
+            "Group A",
+            "Group B",
+            "What it cannot establish"
+          ],
+          "rows": [
+            [
+              "Median time per purchase",
+              "24 min",
+              "31 min",
+              "Innate ability / causal mechanism"
+            ],
+            [
+              "Compared ≥3 sellers",
+              "62%",
+              "49%",
+              "Quality of each comparison"
+            ],
+            [
+              "Self-reported return rate",
+              "8%",
+              "12%",
+              "Population-wide individual ranking"
+            ]
+          ]
+        },
+        {
+          "type": "bullets",
+          "title": "Describe, then qualify",
+          "items": [
+            "In this sample, the median time was seven minutes lower in group A.",
+            "The proportion comparing at least three sellers was 13 percentage points higher.",
+            "Self-report, sampling, product mix and income may affect these estimates."
+          ]
+        },
+        {
+          "type": "callout",
+          "title": "Evidence boundary",
+          "text": "Invented teaching dataset. No confidence intervals or random assignment are supplied; do not claim causation or statistical significance.",
+          "tone": "note"
+        }
+      ],
+      "speakerNotes": "用 Compared ≥3 sellers 那行练习读出 62% 与 49% 的差值，请学生用 percentage points 口述 13 个百分点。接着问比较次数能回答关于比较质量的什么问题。"
+    },
+    {
+      "id": "page-3",
+      "number": 3,
+      "title": "Competing Frameworks · Hypothesis Is Not Evidence",
+      "body": [
+        "Two explanations to investigate",
+        "Question",
+        "Evolutionary hypothesis",
+        "Social conditioning",
+        "Proposed mechanism",
+        "Inherited tendencies shaped by selection",
+        "Norms, roles, incentives and learning",
+        "Prediction needed",
+        "Specify a measurable, falsifiable pattern",
+        "Predict change across contexts or training",
+        "Confounders",
+        "Culture, income, task and measurement",
+        "Selection, prior experience, institutions",
+        "Evidence required",
+        "Independent tests beyond the P2 table",
+        "Longitudinal / experimental comparisons",
+        "A disciplined response",
+        "The observed pattern is consistent with more than one explanation. It does not, by itself, identify the causal mechanism.",
+        "Do not naturalize a stereotype",
+        "Treat these as competing hypotheses to test, not settled conclusions about any gender or group."
+      ],
+      "source": {
+        "name": "大学英语 Unit 4：实证阅读、学术审慎语与思辨交锋",
+        "pageNumber": 3
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "table",
+          "title": "Two explanations to investigate",
+          "headers": [
+            "Question",
+            "Evolutionary hypothesis",
+            "Social conditioning"
+          ],
+          "rows": [
+            [
+              "Proposed mechanism",
+              "Inherited tendencies shaped by selection",
+              "Norms, roles, incentives and learning"
+            ],
+            [
+              "Prediction needed",
+              "Specify a measurable, falsifiable pattern",
+              "Predict change across contexts or training"
+            ],
+            [
+              "Confounders",
+              "Culture, income, task and measurement",
+              "Selection, prior experience, institutions"
+            ],
+            [
+              "Evidence required",
+              "Independent tests beyond the P2 table",
+              "Longitudinal / experimental comparisons"
+            ]
+          ]
+        },
+        {
+          "type": "callout",
+          "title": "A disciplined response",
+          "text": "The observed pattern is consistent with more than one explanation. It does not, by itself, identify the causal mechanism.",
+          "tone": "note"
+        },
+        {
+          "type": "callout",
+          "title": "Do not naturalize a stereotype",
+          "text": "Treat these as competing hypotheses to test, not settled conclusions about any gender or group.",
+          "tone": "warning"
+        }
+      ],
+      "speakerNotes": "从同一组差异出发，请两组各写一个理论能够预测且可被推翻的结果。交换检查文化或收入变化时预测是否仍成立。"
+    },
+    {
+      "id": "page-4",
+      "number": 4,
+      "title": "Academic Writing · Hedging in Empirical Claims",
+      "body": [
+        "Match grammatical certainty to empirical support",
+        "Overclaim",
+        "Calibrated version",
+        "The study proves biology determines behaviour.",
+        "The pattern may be consistent with several mechanisms.",
+        "All members of A make better decisions.",
+        "Group A had a lower average return rate in this sample.",
+        "This always works.",
+        "The intervention may help under the stated conditions.",
+        "Your task",
+        "Read four candidate conclusions. Choose the one whose scope fits the table, then explain why the others overreach."
+      ],
+      "source": {
+        "name": "大学英语 Unit 4：实证阅读、学术审慎语与思辨交锋",
+        "pageNumber": 4
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "table",
+          "title": "Match grammatical certainty to empirical support",
+          "headers": [
+            "Overclaim",
+            "Calibrated version"
+          ],
+          "rows": [
+            [
+              "The study proves biology determines behaviour.",
+              "The pattern may be consistent with several mechanisms."
+            ],
+            [
+              "All members of A make better decisions.",
+              "Group A had a lower average return rate in this sample."
+            ],
+            [
+              "This always works.",
+              "The intervention may help under the stated conditions."
+            ]
+          ]
+        },
+        {
+          "type": "callout",
+          "title": "Your task",
+          "text": "Read four candidate conclusions. Choose the one whose scope fits the table, then explain why the others overreach.",
+          "tone": "note"
+        }
+      ],
+      "speakerNotes": "投票前把 in this sample 写到黑板上。公布后让学生圈出 overclaim 的范围词，再挑一个与调查设计相称的审慎动词。",
+      "interaction": {
+        "id": "harness-p4",
+        "activityId": "concept-diagnosis@1",
+        "correctOptionId": "A",
+        "moduleConfig": {
+          "quickReasons": [
+            "“may contribute” leaves room for alternative explanations",
+            "a large sample proves a universal claim",
+            "a group mean directly predicts each person"
+          ],
+          "takeaway": {
+            "summary": "Use “suggest / may contribute to / in this sample” to calibrate a claim to observational evidence.",
+            "pitfall": "Hedging is evidence calibration, not adding “maybe” to an unsupported universal claim."
+          }
+        },
+        "evidenceIds": [
+          "M1",
+          "M2",
+          "M3",
+          "M4",
+          "M5",
+          "M6"
+        ],
+        "sourceEvidence": [
+          {
+            "id": "M1",
+            "quote": "Match grammatical certainty to empirical support"
+          },
+          {
+            "id": "M2",
+            "quote": "Overclaim"
+          },
+          {
+            "id": "M3",
+            "quote": "Calibrated version"
+          },
+          {
+            "id": "M4",
+            "quote": "The study proves biology determines behaviour."
+          },
+          {
+            "id": "M5",
+            "quote": "The pattern may be consistent with several mechanisms."
+          },
+          {
+            "id": "M6",
+            "quote": "All members of A make better decisions."
+          }
+        ],
+        "title": "Hedging：结论强度与证据强度",
+        "subject": "大学课堂 · 双轮机制诊断",
+        "description": "先独立判断，再用证据修订。",
+        "prompt": "Using the classroom survey in P2, which conclusion keeps the scope and uncertainty of the evidence?",
+        "options": [
+          {
+            "id": "A",
+            "label": "The data suggest that social expectations may contribute to the observed group difference."
+          },
+          {
+            "id": "B",
+            "label": "The survey proves that every member of group A shops more efficiently."
+          },
+          {
+            "id": "C",
+            "label": "Biology alone determines all purchasing decisions."
+          },
+          {
+            "id": "D",
+            "label": "These results demonstrate that group membership predicts individual ability with certainty."
+          }
+        ],
+        "branches": [
+          {
+            "id": "mechanism",
+            "title": "展开机制与状态",
+            "description": "逐项展开本页机制，用原页条件检验首轮理由。",
+            "evidenceIds": [
+              "M1",
+              "M2",
+              "M3",
+              "M4",
+              "M5",
+              "M6"
+            ],
+            "revisionPrompt": "依据本页机制重新判断，写出支持你判断的具体条件。"
+          },
+          {
+            "id": "counterexample",
+            "title": "检查边界与反例",
+            "description": "构造一个边界反例，检查哪些结论需要附加条件。",
+            "evidenceIds": [
+              "M1",
+              "M2",
+              "M3",
+              "M4",
+              "M5",
+              "M6"
+            ],
+            "revisionPrompt": "用反例检验后改答，并指出原判断遗漏的条件。"
+          }
+        ],
+        "skills": [],
+        "steps": [],
+        "quickReasons": [
+          "“may contribute” leaves room for alternative explanations",
+          "a large sample proves a universal claim",
+          "a group mean directly predicts each person"
+        ],
+        "takeaway": {
+          "pitfall": "Hedging is evidence calibration, not adding “maybe” to an unsupported universal claim.",
+          "summary": "Use “suggest / may contribute to / in this sample” to calibrate a claim to observational evidence."
+        }
+      }
+    },
+    {
+      "id": "page-5",
+      "number": 5,
+      "title": "Academic Collocations & Discourse Markers",
+      "body": [
+        "Practice rewrites · original classroom sentences",
+        "Expression",
+        "Contextual sentence",
+        "Function",
+        "empirical evidence",
+        "We need empirical evidence to test this explanation.",
+        "distinguish data from intuition",
+        "in line with",
+        "The pattern is in line with, but does not prove, the hypothesis.",
+        "qualified agreement",
+        "subscribe to",
+        "Some reviewers subscribe to this framework.",
+        "state a position, not a fact",
+        "at the expense of",
+        "Efficiency should not be pursued at the expense of fairness.",
+        "name a trade-off",
+        "nevertheless / whereas",
+        "A was faster; nevertheless, quality was not measured.",
+        "concession / contrast",
+        "Micro rewrite",
+        "Replace “The table proves all A are superior” with a scoped description, an alternative explanation, and a limitation."
+      ],
+      "source": {
+        "name": "大学英语 Unit 4：实证阅读、学术审慎语与思辨交锋",
+        "pageNumber": 5
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "table",
+          "title": "Practice rewrites · original classroom sentences",
+          "headers": [
+            "Expression",
+            "Contextual sentence",
+            "Function"
+          ],
+          "rows": [
+            [
+              "empirical evidence",
+              "We need empirical evidence to test this explanation.",
+              "distinguish data from intuition"
+            ],
+            [
+              "in line with",
+              "The pattern is in line with, but does not prove, the hypothesis.",
+              "qualified agreement"
+            ],
+            [
+              "subscribe to",
+              "Some reviewers subscribe to this framework.",
+              "state a position, not a fact"
+            ],
+            [
+              "at the expense of",
+              "Efficiency should not be pursued at the expense of fairness.",
+              "name a trade-off"
+            ],
+            [
+              "nevertheless / whereas",
+              "A was faster; nevertheless, quality was not measured.",
+              "concession / contrast"
+            ]
+          ]
+        },
+        {
+          "type": "callout",
+          "title": "Micro rewrite",
+          "text": "Replace “The table proves all A are superior” with a scoped description, an alternative explanation, and a limitation.",
+          "tone": "success"
+        }
+      ],
+      "speakerNotes": "让学生用 in line with 连接观察与假设，再用 nevertheless 引出具体限制。请另一位学生用 at the expense of 说出一项可以检验的政策代价。"
+    },
+    {
+      "id": "page-6",
+      "number": 6,
+      "title": "Reading 2 · From Pen Names to Corpus Evidence",
+      "body": [
+        "Simulated corpus · 10,287 book reviews",
+        "Period",
+        "Reviews",
+        "Coverage: women-authored books",
+        "“brilliant” odds ratio W/M",
+        "1900–1949",
+        "2,100",
+        "24%",
+        "0.62",
+        "1950–1999",
+        "3,800",
+        "35%",
+        "0.78",
+        "2000–2024",
+        "4,387",
+        "47%",
+        "0.91",
+        "Total",
+        "10,287",
+        "Not an equal-period average",
+        "No pooled estimate supplied",
+        "Connect history to an empirical question",
+        "Nineteenth-century pen names motivate questions about identity and reception.",
+        "Coverage share and adjective odds measure different phenomena.",
+        "OR<1 indicates lower observed odds in this synthetic table, not causal proof of reviewer bias.",
+        "Missing evidence",
+        "No actual corpus, publication mix, uncertainty intervals or controls are supplied. These simulated values cannot establish the effect of anonymity."
+      ],
+      "source": {
+        "name": "大学英语 Unit 4：实证阅读、学术审慎语与思辨交锋",
+        "pageNumber": 6
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "table",
+          "title": "Simulated corpus · 10,287 book reviews",
+          "headers": [
+            "Period",
+            "Reviews",
+            "Coverage: women-authored books",
+            "“brilliant” odds ratio W/M"
+          ],
+          "rows": [
+            [
+              "1900–1949",
+              "2,100",
+              "24%",
+              "0.62"
+            ],
+            [
+              "1950–1999",
+              "3,800",
+              "35%",
+              "0.78"
+            ],
+            [
+              "2000–2024",
+              "4,387",
+              "47%",
+              "0.91"
+            ],
+            [
+              "Total",
+              "10,287",
+              "Not an equal-period average",
+              "No pooled estimate supplied"
+            ]
+          ]
+        },
+        {
+          "type": "bullets",
+          "title": "Connect history to an empirical question",
+          "items": [
+            "Nineteenth-century pen names motivate questions about identity and reception.",
+            "Coverage share and adjective odds measure different phenomena.",
+            "OR<1 indicates lower observed odds in this synthetic table, not causal proof of reviewer bias."
+          ]
+        },
+        {
+          "type": "callout",
+          "title": "Missing evidence",
+          "text": "No actual corpus, publication mix, uncertainty intervals or controls are supplied. These simulated values cannot establish the effect of anonymity.",
+          "tone": "note"
+        }
+      ],
+      "speakerNotes": "让学生分别解释 47% 的分母与 0.91 比较的是哪两组的 odds。追问若出版类型分布变化，现有表格能支持怎样的结论。"
+    },
+    {
+      "id": "page-7",
+      "number": 7,
+      "title": "Critical Logic Check · The Ecological Fallacy",
+      "body": [
+        "Aggregate → individual?",
+        "A group-level association is a starting point for inquiry. It is not a reliable rule for judging every person in that group.",
+        "Two levels of evidence",
+        "Level",
+        "Permitted claim",
+        "Group averages",
+        "A and B differ on the recorded sample measure.",
+        "Individual ability",
+        "Requires individual, task-relevant evidence.",
+        "Causal mechanism",
+        "Requires a design that addresses alternative explanations."
+      ],
+      "source": {
+        "name": "大学英语 Unit 4：实证阅读、学术审慎语与思辨交锋",
+        "pageNumber": 7
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "callout",
+          "title": "Aggregate → individual?",
+          "text": "A group-level association is a starting point for inquiry. It is not a reliable rule for judging every person in that group.",
+          "tone": "note"
+        },
+        {
+          "type": "table",
+          "title": "Two levels of evidence",
+          "headers": [
+            "Level",
+            "Permitted claim"
+          ],
+          "rows": [
+            [
+              "Group averages",
+              "A and B differ on the recorded sample measure."
+            ],
+            [
+              "Individual ability",
+              "Requires individual, task-relevant evidence."
+            ],
+            [
+              "Causal mechanism",
+              "Requires a design that addresses alternative explanations."
+            ]
+          ]
+        }
+      ],
+      "speakerNotes": "先按行标记推断对象，找出从 group average 换成 every individual 的第一处。改答时要求说清需要补哪类个体证据。",
+      "interaction": {
+        "id": "harness-p7",
+        "activityId": "step-fault@1",
+        "correctOptionId": "S3",
+        "moduleConfig": {
+          "artifactTitle": "Critical Logic Check：生态谬误",
+          "artifactLang": "flow",
+          "steps": [
+            {
+              "id": "S1",
+              "line": "1",
+              "content": "In the P2 sample, group A reported a lower average return rate than group B."
+            },
+            {
+              "id": "S2",
+              "line": "2",
+              "content": "The difference describes group averages in this sample."
+            },
+            {
+              "id": "S3",
+              "line": "3",
+              "content": "Therefore, every individual in group A has better decision-making ability than every individual in group B."
+            },
+            {
+              "id": "S4",
+              "line": "4",
+              "content": "Admissions committees should use group membership to rank individual applicants."
+            },
+            {
+              "id": "S5",
+              "line": "5",
+              "content": "No individual assessment or further evidence is necessary."
+            }
+          ],
+          "faultStepId": "S3",
+          "faultDiagnosis": "Step3 commits an ecological fallacy: aggregate differences do not establish individual ability. Observational group comparisons also do not identify a causal mechanism.",
+          "quickReasons": [
+            "这一步改变了物理量的含义",
+            "数据并未支持这个因果推断",
+            "后续代数正确，但前提已错"
+          ],
+          "takeaway": {
+            "summary": "Step3 commits an ecological fallacy: aggregate differences do not establish individual ability. Observational group comparisons also do not identify a causal mechanism.",
+            "pitfall": "找首次无效步骤；后续结果错误未必是第一处错误。"
+          }
+        },
+        "evidenceIds": [
+          "M1",
+          "M2",
+          "M3",
+          "M4",
+          "M5",
+          "M6"
+        ],
+        "sourceEvidence": [
+          {
+            "id": "M1",
+            "quote": "Aggregate → individual?"
+          },
+          {
+            "id": "M2",
+            "quote": "A group-level association is a starting point for inquiry. It is not a reliable rule for judging every person in that group."
+          },
+          {
+            "id": "M3",
+            "quote": "Two levels of evidence"
+          },
+          {
+            "id": "M4",
+            "quote": "Level"
+          },
+          {
+            "id": "M5",
+            "quote": "Permitted claim"
+          },
+          {
+            "id": "M6",
+            "quote": "Group averages"
+          }
+        ],
+        "title": "Critical Logic Check：生态谬误",
+        "subject": "逐行推理审计",
+        "description": "定位首次不成立的步骤。",
+        "prompt": "Find the first inferential break. These are simulated classroom data, and group A/B are sample labels, not innate categories.",
+        "options": [
+          {
+            "id": "S1",
+            "label": "第 1 行 / 步"
+          },
+          {
+            "id": "S2",
+            "label": "第 2 行 / 步"
+          },
+          {
+            "id": "S3",
+            "label": "第 3 行 / 步"
+          },
+          {
+            "id": "S4",
+            "label": "第 4 行 / 步"
+          },
+          {
+            "id": "S5",
+            "label": "第 5 行 / 步"
+          }
+        ],
+        "branches": [
+          {
+            "id": "mechanism",
+            "title": "逐步追踪对象与量纲",
+            "description": "逐项展开本页机制，用原页条件检验首轮理由。",
+            "evidenceIds": [
+              "M1",
+              "M2",
+              "M3",
+              "M4",
+              "M5",
+              "M6"
+            ],
+            "revisionPrompt": "依据本页机制重新判断，写出支持你判断的具体条件。"
+          },
+          {
+            "id": "counterexample",
+            "title": "比较错误推导和正确推导",
+            "description": "构造一个边界反例，检查哪些结论需要附加条件。",
+            "evidenceIds": [
+              "M1",
+              "M2",
+              "M3",
+              "M4",
+              "M5",
+              "M6"
+            ],
+            "revisionPrompt": "用反例检验后改答，并指出原判断遗漏的条件。"
+          }
+        ],
+        "skills": [],
+        "steps": [],
+        "quickReasons": [
+          "这一步改变了物理量的含义",
+          "数据并未支持这个因果推断",
+          "后续代数正确，但前提已错"
+        ],
+        "takeaway": {
+          "pitfall": "找首次无效步骤；后续结果错误未必是第一处错误。",
+          "summary": "Step3 commits an ecological fallacy: aggregate differences do not establish individual ability. Observational group comparisons also do not identify a causal mechanism."
+        }
+      }
+    },
+    {
+      "id": "page-8",
+      "number": 8,
+      "title": "Seminar · Should Anonymous Blind Review Be Mandatory?",
+      "body": [
+        "Evidence bank on the same slide",
+        "P2: sample averages do not justify individual ranking.",
+        "P6: representation and language patterns motivate further audits.",
+        "Neither table tests an admissions or hiring intervention. Transfer requires an explicit warrant.",
+        "Question the blind-box AI peer",
+        "Ask what criterion is missing, what evidence would change its mind, and which policy stage can be evaluated in a pilot."
+      ],
+      "source": {
+        "name": "大学英语 Unit 4：实证阅读、学术审慎语与思辨交锋",
+        "pageNumber": 8
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "bullets",
+          "title": "Evidence bank on the same slide",
+          "items": [
+            "P2: sample averages do not justify individual ranking.",
+            "P6: representation and language patterns motivate further audits.",
+            "Neither table tests an admissions or hiring intervention. Transfer requires an explicit warrant."
+          ]
+        },
+        {
+          "type": "callout",
+          "title": "Question the blind-box AI peer",
+          "text": "Ask what criterion is missing, what evidence would change its mind, and which policy stage can be evaluated in a pilot.",
+          "tone": "note"
+        }
+      ],
+      "speakerNotes": "先收齐每人自己的方案和一条证据，再打开盲盒辩友。请学生指出成本论证漏掉的一项准则，并设计能测量效果的小范围试点。",
+      "interaction": {
+        "id": "harness-p8",
+        "activityId": "evidence-weighing@1",
+        "correctOptionId": null,
+        "moduleConfig": {
+          "quickReasons": [
+            "P6 motivates a bias audit, but does not prove hiring effects",
+            "Administrative cost is relevant but not the only criterion",
+            "P2 group means cannot rank an individual applicant"
+          ],
+          "takeaway": {
+            "summary": "Claim → cited evidence → warrant → limitation → feasible policy.",
+            "pitfall": "P2/P6 are simulated studies from other domains; neither is causal proof that anonymization improves admissions."
+          },
+          "dimensions": [
+            "Bias & fairness",
+            "Administrative cost",
+            "Context & accountability"
+          ],
+          "aiPeer": {
+            "persona": "Blind-box AI peer · cost-only analyst",
+            "claim": "Blind review requires extra administration. Therefore universities should reject it everywhere; bias can be ignored because reviewers are professionals.",
+            "flawHint": "P6 raises a concern about representation and language patterns. Ask for effect sizes, causal identification and costs in the target setting; expose the omitted fairness criterion."
+          }
+        },
+        "evidenceIds": [
+          "M1",
+          "M2",
+          "M3",
+          "M4",
+          "M5",
+          "M6"
+        ],
+        "sourceEvidence": [
+          {
+            "id": "M1",
+            "quote": "Evidence bank on the same slide"
+          },
+          {
+            "id": "M2",
+            "quote": "P2: sample averages do not justify individual ranking."
+          },
+          {
+            "id": "M3",
+            "quote": "P6: representation and language patterns motivate further audits."
+          },
+          {
+            "id": "M4",
+            "quote": "Neither table tests an admissions or hiring intervention. Transfer requires an explicit warrant."
+          },
+          {
+            "id": "M5",
+            "quote": "Question the blind-box AI peer"
+          },
+          {
+            "id": "M6",
+            "quote": "Ask what criterion is missing, what evidence would change its mind, and which policy stage can be evaluated in a pilot."
+          }
+        ],
+        "title": "Should anonymous blind review be mandatory?",
+        "subject": "Academic English · evidence-based seminar",
+        "description": "The AI peer is a deliberately partial classroom role, not an authority.",
+        "prompt": "Should anonymous blind review be mandatory in university admissions & hiring? Cite P2/P6, separate evidence from analogy, and name a cost or missing variable.",
+        "options": [
+          {
+            "id": "A",
+            "label": "Mandate it in the initial written screening stage"
+          },
+          {
+            "id": "B",
+            "label": "Pilot it with bias and cost audits before expansion"
+          },
+          {
+            "id": "C",
+            "label": "Keep identity visible but add independent bias audits"
+          },
+          {
+            "id": "D",
+            "label": "Decide by task; retain identity where context is essential"
+          }
+        ],
+        "branches": [
+          {
+            "id": "mechanism",
+            "title": "Compare policy costs with bias risks",
+            "description": "逐项展开本页机制，用原页条件检验首轮理由。",
+            "evidenceIds": [
+              "M1",
+              "M2",
+              "M3",
+              "M4",
+              "M5",
+              "M6"
+            ],
+            "revisionPrompt": "依据本页机制重新判断，写出支持你判断的具体条件。"
+          },
+          {
+            "id": "counterexample",
+            "title": "Challenge transfer from reading data to hiring",
+            "description": "构造一个边界反例，检查哪些结论需要附加条件。",
+            "evidenceIds": [
+              "M1",
+              "M2",
+              "M3",
+              "M4",
+              "M5",
+              "M6"
+            ],
+            "revisionPrompt": "用反例检验后改答，并指出原判断遗漏的条件。"
+          }
+        ],
+        "skills": [],
+        "steps": [],
+        "quickReasons": [
+          "P6 motivates a bias audit, but does not prove hiring effects",
+          "Administrative cost is relevant but not the only criterion",
+          "P2 group means cannot rank an individual applicant"
+        ],
+        "takeaway": {
+          "pitfall": "P2/P6 are simulated studies from other domains; neither is causal proof that anonymization improves admissions.",
+          "summary": "Claim → cited evidence → warrant → limitation → feasible policy."
+        }
+      }
+    },
+    {
+      "id": "page-9",
+      "number": 9,
+      "title": "Essay Workshop · Compare and Contrast",
+      "body": [
+        "Two valid paragraph architectures",
+        "Structure",
+        "Sequence",
+        "Best use",
+        "Point-by-point",
+        "Criterion1: A/B → Criterion2: A/B → synthesis",
+        "Directly compare the same criteria",
+        "Block",
+        "Framework A → Framework B → explicit synthesis",
+        "First explain unfamiliar frameworks",
+        "A paragraph you can defend",
+        "Topic: Both frameworks address the pattern, but propose different mechanisms.",
+        "Evidence: In the simulated P2 sample, ...",
+        "Warrant: This is consistent with ..., although ...",
+        "Counterpoint: However, the design cannot rule out ...",
+        "Synthesis: Further evidence from ... would be needed.",
+        "Workshop constraint",
+        "120–150 words; cite one table accurately, use two hedges, state one missing variable, and avoid individual stereotypes."
+      ],
+      "source": {
+        "name": "大学英语 Unit 4：实证阅读、学术审慎语与思辨交锋",
+        "pageNumber": 9
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "table",
+          "title": "Two valid paragraph architectures",
+          "headers": [
+            "Structure",
+            "Sequence",
+            "Best use"
+          ],
+          "rows": [
+            [
+              "Point-by-point",
+              "Criterion1: A/B → Criterion2: A/B → synthesis",
+              "Directly compare the same criteria"
+            ],
+            [
+              "Block",
+              "Framework A → Framework B → explicit synthesis",
+              "First explain unfamiliar frameworks"
+            ]
+          ]
+        },
+        {
+          "type": "steps",
+          "title": "A paragraph you can defend",
+          "items": [
+            "Topic: Both frameworks address the pattern, but propose different mechanisms.",
+            "Evidence: In the simulated P2 sample, ...",
+            "Warrant: This is consistent with ..., although ...",
+            "Counterpoint: However, the design cannot rule out ...",
+            "Synthesis: Further evidence from ... would be needed."
+          ]
+        },
+        {
+          "type": "callout",
+          "title": "Workshop constraint",
+          "text": "120–150 words; cite one table accurately, use two hedges, state one missing variable, and avoid individual stereotypes.",
+          "tone": "success"
+        }
+      ],
+      "speakerNotes": "把同一条样本证据分别放进逐点对比和分块对比的大纲里。请同伴检查哪一句解释了数据如何支持主张，并改写含糊的一处。"
+    },
+    {
+      "id": "page-10",
+      "number": 10,
+      "title": "Unit 4 · Academic Language & Critical Reading Checklist",
+      "body": [
+        "Before submitting your paragraph",
+        "Check",
+        "Ask yourself",
+        "Scope",
+        "Did I say “in this sample” when appropriate?",
+        "Evidence",
+        "Did I separate observed data from a proposed explanation?",
+        "Hedging",
+        "Does my certainty match the design and uncertainty?",
+        "Logic",
+        "Did I infer individual ability from a group average?",
+        "Transfer",
+        "Why would evidence from reviews apply to admissions?",
+        "Policy",
+        "Did I name costs, fairness and a testable pilot?",
+        "Language",
+        "Are empirical evidence / in line with / at the expense of used correctly?",
+        "Exit sentence",
+        "The evidence suggests ___; however, ___ remains uncertain. I would revise my position if ___."
+      ],
+      "source": {
+        "name": "大学英语 Unit 4：实证阅读、学术审慎语与思辨交锋",
+        "pageNumber": 10
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "table",
+          "title": "Before submitting your paragraph",
+          "headers": [
+            "Check",
+            "Ask yourself"
+          ],
+          "rows": [
+            [
+              "Scope",
+              "Did I say “in this sample” when appropriate?"
+            ],
+            [
+              "Evidence",
+              "Did I separate observed data from a proposed explanation?"
+            ],
+            [
+              "Hedging",
+              "Does my certainty match the design and uncertainty?"
+            ],
+            [
+              "Logic",
+              "Did I infer individual ability from a group average?"
+            ],
+            [
+              "Transfer",
+              "Why would evidence from reviews apply to admissions?"
+            ],
+            [
+              "Policy",
+              "Did I name costs, fairness and a testable pilot?"
+            ],
+            [
+              "Language",
+              "Are empirical evidence / in line with / at the expense of used correctly?"
+            ]
+          ]
+        },
+        {
+          "type": "callout",
+          "title": "Exit sentence",
+          "text": "The evidence suggests ___; however, ___ remains uncertain. I would revise my position if ___.",
+          "tone": "success"
+        }
+      ],
+      "speakerNotes": "请每人交一句带证据范围和不确定性的退场句，再补一条愿意据以改判的新证据。抽两句复核主张、语气和证据的对应。"
+    }
+  ]
+}

@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Node ${{ matrix.node }} regression suite
@@ -17,24 +20,31 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - name: Verify Python helper syntax
-        run: python3 -m py_compile studio/tools/material-import-*.py
-      - name: Enable real PDF and PowerPoint import tests
-        if: matrix.node == 24
+      - name: Enable classroom integration tests
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libreoffice-impress python3-uno
-          python3 -m venv "$RUNNER_TEMP/polyphony-pdf"
-          "$RUNNER_TEMP/polyphony-pdf/bin/python" -m pip install 'PyMuPDF>=1.24,<2'
-          echo "POLYPHONY_PDF_PYTHON=$RUNNER_TEMP/polyphony-pdf/bin/python" >> "$GITHUB_ENV"
+          sudo apt-get install -y --no-install-recommends libreoffice-impress python3-uno python3-pymupdf fonts-noto-cjk
+          python3 -m venv "$RUNNER_TEMP/polyphony-browser"
+          browser_python="$RUNNER_TEMP/polyphony-browser/bin/python"
+          "$browser_python" -m pip install playwright
+          "$browser_python" -m playwright install --with-deps chromium
+          echo "POLYPHONY_TEST_CHROMIUM=$("$browser_python" -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')" >> "$GITHUB_ENV"
+          echo 'POLYPHONY_PDF_PYTHON=/usr/bin/python3' >> "$GITHUB_ENV"
           echo 'POLYPHONY_LIBREOFFICE_PYTHON=/usr/bin/python3' >> "$GITHUB_ENV"
-      - name: Run zero-dependency test suite
+          echo 'POLYPHONY_REQUIRE_INTEGRATION=1' >> "$GITHUB_ENV"
+      - name: Verify Python helpers
+        run: python3 -m compileall -q studio/tools studio/scripts
+      - name: Test import, classroom transport, model protocol and storage
         working-directory: studio
         run: npm test
-      - name: Verify offline standalone exports stay in sync
+      - name: Verify standalone exports
         working-directory: studio
         run: |
-          node tools/export-offline.mjs /tmp/共演演示室.html
-          node tools/export-offline.mjs --challenges /tmp/Polyphony-Playlab.html
-          diff -u ../共演演示室.html /tmp/共演演示室.html
-          diff -u ../Polyphony-Playlab.html /tmp/Polyphony-Playlab.html
+          node tools/export-offline.mjs "$RUNNER_TEMP/platform.html"
+          node tools/export-offline.mjs --demo "$RUNNER_TEMP/demo.html"
+          cmp "$RUNNER_TEMP/platform.html" ../共演智课-离线平台.html
+          cmp "$RUNNER_TEMP/demo.html" ../共演智课-单文件离线演示版.html
+      - name: Verify the formal classroom and the separate demo in Chromium
+        if: matrix.node == 24
+        run: '"$RUNNER_TEMP/polyphony-browser/bin/python" studio/scripts/verify-clean-classroom.py'
+

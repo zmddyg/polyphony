@@ -1,0 +1,172 @@
+{
+  "version": "polyphony.harness@1",
+  "pacingMode": "full-demo",
+  "stages": [
+    {
+      "id": "ingest",
+      "title": "原稿结构解析与证据编号",
+      "status": "complete",
+      "pageCount": 12,
+      "blockCount": 313
+    },
+    {
+      "id": "triage",
+      "title": "全卷脉络扫描与交互卡点规划",
+      "status": "complete",
+      "selectedPages": [
+        {
+          "pageNumber": 4,
+          "activityId": "concept-diagnosis@1",
+          "quote": "先初始化，再讨论 p+1"
+        },
+        {
+          "pageNumber": 7,
+          "activityId": "step-fault@1",
+          "quote": "有意保留错误的完整7行函数"
+        },
+        {
+          "pageNumber": 11,
+          "activityId": "concept-diagnosis@1",
+          "quote": "顺序明确，逐句执行"
+        }
+      ],
+      "untouchedPages": 9,
+      "selectionSource": "local"
+    },
+    {
+      "id": "synthesize",
+      "title": "模块化交互契约并发生成",
+      "status": "complete",
+      "source": "local",
+      "generatedPages": 3
+    },
+    {
+      "id": "verify_repair",
+      "title": "原页引文溯源、安全表达式与契约自修复",
+      "status": "complete",
+      "validatedPages": 3,
+      "repairCount": 0
+    },
+    {
+      "id": "dryrun_compile",
+      "title": "双轮状态机沙箱预演与上线教案编译",
+      "status": "complete",
+      "compiledPages": 12,
+      "format": "polyphony.lecture@1"
+    }
+  ],
+  "repairs": [],
+  "dryRuns": [
+    {
+      "pageNumber": 4,
+      "activityId": "concept-diagnosis@1",
+      "phase": "closed",
+      "round": 2,
+      "commands": [
+        "loadLesson",
+        "join",
+        "respond",
+        "reveal",
+        "analyze",
+        "branch",
+        "revise",
+        "respond",
+        "reveal",
+        "close"
+      ],
+      "responses": 2
+    },
+    {
+      "pageNumber": 7,
+      "activityId": "step-fault@1",
+      "phase": "closed",
+      "round": 2,
+      "commands": [
+        "loadLesson",
+        "join",
+        "respond",
+        "reveal",
+        "analyze",
+        "branch",
+        "revise",
+        "respond",
+        "reveal",
+        "close"
+      ],
+      "responses": 2
+    },
+    {
+      "pageNumber": 11,
+      "activityId": "concept-diagnosis@1",
+      "phase": "closed",
+      "round": 2,
+      "commands": [
+        "loadLesson",
+        "join",
+        "respond",
+        "reveal",
+        "analyze",
+        "branch",
+        "revise",
+        "respond",
+        "reveal",
+        "close"
+      ],
+      "responses": 2
+    }
+  ],
+  "pageMemories": [
+    {
+      "pageNumber": 1,
+      "memories": []
+    },
+    {
+      "pageNumber": 2,
+      "memories": []
+    },
+    {
+      "pageNumber": 3,
+      "memories": []
+    },
+    {
+      "pageNumber": 4,
+      "memories": []
+    },
+    {
+      "pageNumber": 5,
+      "memories": []
+    },
+    {
+      "pageNumber": 6,
+      "memories": []
+    },
+    {
+      "pageNumber": 7,
+      "memories": []
+    },
+    {
+      "pageNumber": 8,
+      "memories": []
+    },
+    {
+      "pageNumber": 9,
+      "memories": []
+    },
+    {
+      "pageNumber": 10,
+      "memories": []
+    },
+    {
+      "pageNumber": 11,
+      "memories": []
+    },
+    {
+      "pageNumber": 12,
+      "memories": []
+    }
+  ],
+  "mode": "auto",
+  "versionId": "sha256-e766b625649ea9c4f4f1714e142096f98f044d50c8d417ab2de417ba40ce495b",
+  "contentDigest": "sha256-e766b625649ea9c4f4f1714e142096f98f044d50c8d417ab2de417ba40ce495b",
+  "source": "local"
+}

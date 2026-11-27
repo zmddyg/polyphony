@@ -1,0 +1,1091 @@
+{
+  "format": "polyphony.lecture",
+  "version": 1,
+  "title": "物理光学与光电子学：复振幅干涉、夫琅禾费衍射与电光调制实战",
+  "source": {
+    "name": "物理光学与光电子学：复振幅干涉、夫琅禾费衍射与电光调制实战",
+    "kind": "native",
+    "versionId": "sha256-0a3cec81a5bbd04dce7d031d07b85e9162f53a51cdfc094e057520fb704ed241"
+  },
+  "pages": [
+    {
+      "id": "page-1",
+      "number": 1,
+      "title": "从复振幅叠加到高速片上电光调制",
+      "body": [
+        "一条物理链路",
+        "复振幅：把振幅与相位装进一个量",
+        "相干叠加：交叉项让光强依赖相位差",
+        "孔径积分：单缝包络 × 多缝干涉因子",
+        "电光效应：电压调相位，干涉把相位变成功率",
+        "探测与读出：平方律、RC与行波匹配决定带宽",
+        "固定相位与传播方向的约定",
+        "U(P,t)=A(P)\\cos[\\omega t-\\varphi(P)],\\quad \\tilde{U}(P)=A(P)e^{i\\varphi(P)}",
+        "U(P,t)=\\Re\\!\\left\\{\\tilde{U}(P)e^{-i\\omega t}\\right\\},\\quad \\tilde{U}(\\mathbf{r})=U_0 e^{+i\\mathbf{k}\\cdot\\mathbf{r}}"
+      ],
+      "source": {
+        "name": "物理光学与光电子学：复振幅干涉、夫琅禾费衍射与电光调制实战",
+        "pageNumber": 1
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "steps",
+          "title": "一条物理链路",
+          "items": [
+            "复振幅：把振幅与相位装进一个量",
+            "相干叠加：交叉项让光强依赖相位差",
+            "孔径积分：单缝包络 × 多缝干涉因子",
+            "电光效应：电压调相位，干涉把相位变成功率",
+            "探测与读出：平方律、RC与行波匹配决定带宽"
+          ]
+        },
+        {
+          "type": "formula",
+          "title": "固定相位与传播方向的约定",
+          "items": [
+            "U(P,t)=A(P)\\cos[\\omega t-\\varphi(P)],\\quad \\tilde{U}(P)=A(P)e^{i\\varphi(P)}",
+            "U(P,t)=\\Re\\!\\left\\{\\tilde{U}(P)e^{-i\\omega t}\\right\\},\\quad \\tilde{U}(\\mathbf{r})=U_0 e^{+i\\mathbf{k}\\cdot\\mathbf{r}}"
+          ]
+        }
+      ],
+      "speakerNotes": "把时间因子先写在黑板右侧，请学生沿波矢方向追踪等相位面。保留同一符号约定，再依次问狭缝与调制器各在哪一步改变相位。"
+    },
+    {
+      "id": "page-2",
+      "number": 2,
+      "title": "1.1 单色光波复振幅与相干叠加",
+      "body": [
+        "相干叠加与平方律读出",
+        "光束 1",
+        "复振幅 Ũ₁",
+        "光束 2",
+        "复振幅 Ũ₂",
+        "同点复振幅相加",
+        "Ũ = Ũ₁ + Ũ₂",
+        "取模平方",
+        "强度含相位交叉项",
+        "同频、同偏振的标量模型",
+        "I(P)=\\tilde{U}^{*}(P)\\tilde{U}(P)=A^2(P)",
+        "I=I_1+I_2+2\\sqrt{I_1 I_2}\\cos\\Delta\\varphi,\\quad \\Delta\\varphi=\\varphi_2-\\varphi_1",
+        "V=\\frac{2\\sqrt{I_1 I_2}}{I_1+I_2}\\le 1",
+        "干涉的观测条件",
+        "同频相干、同点重合且偏振有重合分量。两束强度相同时条纹可见度最大。本讲的强度吸收了共同的介质比例常数。"
+      ],
+      "source": {
+        "name": "物理光学与光电子学：复振幅干涉、夫琅禾费衍射与电光调制实战",
+        "pageNumber": 2
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "diagram",
+          "title": "相干叠加与平方律读出",
+          "kind": "flow",
+          "direction": "LR",
+          "nodes": [
+            {
+              "id": "arm1",
+              "label": "光束 1",
+              "sub": "复振幅 Ũ₁",
+              "tone": "primary"
+            },
+            {
+              "id": "arm2",
+              "label": "光束 2",
+              "sub": "复振幅 Ũ₂",
+              "tone": "primary"
+            },
+            {
+              "id": "field",
+              "label": "同点复振幅相加",
+              "sub": "Ũ = Ũ₁ + Ũ₂",
+              "tone": "neutral"
+            },
+            {
+              "id": "power",
+              "label": "取模平方",
+              "sub": "强度含相位交叉项",
+              "tone": "accent"
+            }
+          ],
+          "edges": [
+            {
+              "from": "arm1",
+              "to": "field"
+            },
+            {
+              "from": "arm2",
+              "to": "field"
+            },
+            {
+              "from": "field",
+              "to": "power"
+            }
+          ]
+        },
+        {
+          "type": "formula",
+          "title": "同频、同偏振的标量模型",
+          "items": [
+            "I(P)=\\tilde{U}^{*}(P)\\tilde{U}(P)=A^2(P)",
+            "I=I_1+I_2+2\\sqrt{I_1 I_2}\\cos\\Delta\\varphi,\\quad \\Delta\\varphi=\\varphi_2-\\varphi_1",
+            "V=\\frac{2\\sqrt{I_1 I_2}}{I_1+I_2}\\le 1"
+          ]
+        },
+        {
+          "type": "callout",
+          "title": "干涉的观测条件",
+          "text": "同频相干、同点重合且偏振有重合分量。两束强度相同时条纹可见度最大。本讲的强度吸收了共同的介质比例常数。",
+          "tone": "note"
+        }
+      ],
+      "speakerNotes": "沿图强调先加复振幅再取模平方，展开时让学生指出产生余弦项的两项。把两束相位差改成 π，追问两束各自发亮时为何能得到暗点。"
+    },
+    {
+      "id": "page-3",
+      "number": 3,
+      "title": "推导找茬：3dB 单臂损耗与静态消光比",
+      "body": [
+        "审计的起点",
+        "T_2=\\frac{P_{2,\\mathrm{out}}}{P_{2,\\mathrm{in}}}\\approx 0.5,\\quad t_2=\\left|\\frac{\\tilde{U}_{2,\\mathrm{out}}}{\\tilde{U}_{2,\\mathrm{in}}}\\right|",
+        "\\mathrm{ER}=\\frac{I_{\\mathrm{max}}}{I_{\\mathrm{min}}},\\quad \\mathrm{ER}_{\\mathrm{dB}}=10\\log_{10}(\\mathrm{ER})",
+        "请先独立审计右侧 5 步",
+        "前提是理想相干、等比分束与合束，只有一臂有额外损耗。每一步先核对量的定义，再检查代数。"
+      ],
+      "source": {
+        "name": "物理光学与光电子学：复振幅干涉、夫琅禾费衍射与电光调制实战",
+        "pageNumber": 3
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "formula",
+          "title": "审计的起点",
+          "items": [
+            "T_2=\\frac{P_{2,\\mathrm{out}}}{P_{2,\\mathrm{in}}}\\approx 0.5,\\quad t_2=\\left|\\frac{\\tilde{U}_{2,\\mathrm{out}}}{\\tilde{U}_{2,\\mathrm{in}}}\\right|",
+            "\\mathrm{ER}=\\frac{I_{\\mathrm{max}}}{I_{\\mathrm{min}}},\\quad \\mathrm{ER}_{\\mathrm{dB}}=10\\log_{10}(\\mathrm{ER})"
+          ]
+        },
+        {
+          "type": "callout",
+          "title": "请先独立审计右侧 5 步",
+          "text": "前提是理想相干、等比分束与合束，只有一臂有额外损耗。每一步先核对量的定义，再检查代数。",
+          "tone": "note"
+        }
+      ],
+      "speakerNotes": "让学生给 3 dB 所描述的量贴上功率或振幅标签，再挑出发生偷换的第一步。用“功率约减半，场振幅仍约七成”复核暗端残余。",
+      "interaction": {
+        "id": "harness-p3",
+        "activityId": "step-fault@1",
+        "correctOptionId": "S2",
+        "moduleConfig": {
+          "artifactTitle": "不等损耗双臂干涉：ER 推导审计",
+          "artifactLang": "math",
+          "steps": [
+            {
+              "id": "S1",
+              "line": "1",
+              "content": "第二臂功率透射率 T₂=10^(−3/10)≈0.5（取3dB≈一半）。"
+            },
+            {
+              "id": "S2",
+              "line": "2",
+              "content": "将第二臂振幅透射率写成 t₂=T₂=0.5。"
+            },
+            {
+              "id": "S3",
+              "line": "3",
+              "content": "归一化 I(Δφ)=(1+t₂²+2t₂ cosΔφ)/4。"
+            },
+            {
+              "id": "S4",
+              "line": "4",
+              "content": "Imax=(1+t₂)²/4；Imin=(1−t₂)²/4。"
+            },
+            {
+              "id": "S5",
+              "line": "5",
+              "content": "ER=10log₁₀(Imax/Imin)=10log₁₀(9)≈9.5dB。"
+            }
+          ],
+          "faultStepId": "S2",
+          "faultDiagnosis": "第2步错误：t₂=√T₂≈0.707；ER=[(1+√0.5)/(1−√0.5)]²≈33.97，即15.31dB。严格3.00dB对应T₂≈0.5012，ER≈15.34dB。",
+          "quickReasons": [
+            "这一步改变了物理量的含义",
+            "数据并未支持这个因果推断",
+            "后续代数正确，但前提已错"
+          ],
+          "takeaway": {
+            "summary": "第2步错误：t₂=√T₂≈0.707；ER=[(1+√0.5)/(1−√0.5)]²≈33.97，即15.31dB。严格3.00dB对应T₂≈0.5012，ER≈15.34dB。",
+            "pitfall": "找首次无效步骤；后续结果错误未必是第一处错误。"
+          }
+        },
+        "evidenceIds": [
+          "M1",
+          "M2",
+          "M3",
+          "M4",
+          "M5"
+        ],
+        "sourceEvidence": [
+          {
+            "id": "M1",
+            "quote": "审计的起点"
+          },
+          {
+            "id": "M2",
+            "quote": "T_2=\\frac{P_{2,\\mathrm{out}}}{P_{2,\\mathrm{in}}}\\approx 0.5,\\quad t_2=\\left|\\frac{\\tilde{U}_{2,\\mathrm{out}}}{\\tilde{U}_{2,\\mathrm{in}}}\\right|"
+          },
+          {
+            "id": "M3",
+            "quote": "\\mathrm{ER}=\\frac{I_{\\mathrm{max}}}{I_{\\mathrm{min}}},\\quad \\mathrm{ER}_{\\mathrm{dB}}=10\\log_{10}(\\mathrm{ER})"
+          },
+          {
+            "id": "M4",
+            "quote": "请先独立审计右侧 5 步"
+          },
+          {
+            "id": "M5",
+            "quote": "前提是理想相干、等比分束与合束，只有一臂有额外损耗。每一步先核对量的定义，再检查代数。"
+          }
+        ],
+        "title": "不等损耗双臂干涉：ER 推导审计",
+        "subject": "逐行推理审计",
+        "description": "定位首次不成立的步骤。",
+        "prompt": "输入50:50分束与合束、两臂原先等强，仅第二臂多3dB功率损耗。哪一步首次混淆功率与振幅？",
+        "options": [
+          {
+            "id": "S1",
+            "label": "第 1 行 / 步"
+          },
+          {
+            "id": "S2",
+            "label": "第 2 行 / 步"
+          },
+          {
+            "id": "S3",
+            "label": "第 3 行 / 步"
+          },
+          {
+            "id": "S4",
+            "label": "第 4 行 / 步"
+          },
+          {
+            "id": "S5",
+            "label": "第 5 行 / 步"
+          }
+        ],
+        "branches": [
+          {
+            "id": "mechanism",
+            "title": "逐步追踪对象与量纲",
+            "description": "逐项展开本页机制，用原页条件检验首轮理由。",
+            "evidenceIds": [
+              "M1",
+              "M2",
+              "M3",
+              "M4",
+              "M5"
+            ],
+            "revisionPrompt": "依据本页机制重新判断，写出支持你判断的具体条件。"
+          },
+          {
+            "id": "counterexample",
+            "title": "比较错误推导和正确推导",
+            "description": "构造一个边界反例，检查哪些结论需要附加条件。",
+            "evidenceIds": [
+              "M1",
+              "M2",
+              "M3",
+              "M4",
+              "M5"
+            ],
+            "revisionPrompt": "用反例检验后改答，并指出原判断遗漏的条件。"
+          }
+        ],
+        "skills": [],
+        "steps": [],
+        "quickReasons": [
+          "这一步改变了物理量的含义",
+          "数据并未支持这个因果推断",
+          "后续代数正确，但前提已错"
+        ],
+        "takeaway": {
+          "pitfall": "找首次无效步骤；后续结果错误未必是第一处错误。",
+          "summary": "第2步错误：t₂=√T₂≈0.707；ER=[(1+√0.5)/(1−√0.5)]²≈33.97，即15.31dB。严格3.00dB对应T₂≈0.5012，ER≈15.34dB。"
+        }
+      }
+    },
+    {
+      "id": "page-4",
+      "number": 4,
+      "title": "夫琅禾费单缝衍射与多缝光栅方程",
+      "body": [
+        "远场相干孔径积分",
+        "\\tilde{U}(\\theta)\\propto\\int_{-a/2}^{a/2} e^{-iky\\sin\\theta}\\,\\mathrm{d}y=a\\operatorname{sinc}(\\beta)",
+        "\\beta=\\frac{\\pi a\\sin\\theta}{\\lambda},\\quad \\gamma=\\frac{\\pi d\\sin\\theta}{\\lambda},\\quad \\operatorname{sinc}(u)=\\frac{\\sin u}{u}",
+        "\\frac{I(\\theta)}{I(0)}=\\operatorname{sinc}^2(\\beta)\\frac{\\sin^2(N\\gamma)}{N^2\\sin^2\\gamma}",
+        "包络与阵列的特征位置",
+        "类型",
+        "条件",
+        "物理图像",
+        "单缝暗纹",
+        "a sinθ=qλ，q=±1,±2,…",
+        "半波带两两抵消",
+        "阵列主极大",
+        "d sinθ=mλ",
+        "各缝同相，归一化阵列因子极限为 1",
+        "阵列零点",
+        "Nγ=ℓπ，γ 不是整数 π",
+        "有限阵列相消",
+        "缺级",
+        "m/d=q/a，q≠0",
+        "阵列主极大恰落在包络暗纹",
+        "适用边界",
+        "单色平面波正入射，等宽等距且等照明，观测于远场或透镜焦平面。传播相位 +kR 中，路径差近似 −y sinθ，且 |sinθ|≤1。"
+      ],
+      "source": {
+        "name": "物理光学与光电子学：复振幅干涉、夫琅禾费衍射与电光调制实战",
+        "pageNumber": 4
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "formula",
+          "title": "远场相干孔径积分",
+          "items": [
+            "\\tilde{U}(\\theta)\\propto\\int_{-a/2}^{a/2} e^{-iky\\sin\\theta}\\,\\mathrm{d}y=a\\operatorname{sinc}(\\beta)",
+            "\\beta=\\frac{\\pi a\\sin\\theta}{\\lambda},\\quad \\gamma=\\frac{\\pi d\\sin\\theta}{\\lambda},\\quad \\operatorname{sinc}(u)=\\frac{\\sin u}{u}",
+            "\\frac{I(\\theta)}{I(0)}=\\operatorname{sinc}^2(\\beta)\\frac{\\sin^2(N\\gamma)}{N^2\\sin^2\\gamma}"
+          ]
+        },
+        {
+          "type": "table",
+          "title": "包络与阵列的特征位置",
+          "headers": [
+            "类型",
+            "条件",
+            "物理图像"
+          ],
+          "rows": [
+            [
+              "单缝暗纹",
+              "a sinθ=qλ，q=±1,±2,…",
+              "半波带两两抵消"
+            ],
+            [
+              "阵列主极大",
+              "d sinθ=mλ",
+              "各缝同相，归一化阵列因子极限为 1"
+            ],
+            [
+              "阵列零点",
+              "Nγ=ℓπ，γ 不是整数 π",
+              "有限阵列相消"
+            ],
+            [
+              "缺级",
+              "m/d=q/a，q≠0",
+              "阵列主极大恰落在包络暗纹"
+            ]
+          ]
+        },
+        {
+          "type": "callout",
+          "title": "适用边界",
+          "text": "单色平面波正入射，等宽等距且等照明，观测于远场或透镜焦平面。传播相位 +kR 中，路径差近似 −y sinθ，且 |sinθ|≤1。",
+          "tone": "note"
+        }
+      ],
+      "speakerNotes": "先让学生从路程近似 R−y sinθ 找出孔径积分的负号。再用两组相位匹配条件检验某级条纹是否缺失，并让他们解释 γ 为整数 π 时该取何种极限。"
+    },
+    {
+      "id": "page-5",
+      "number": 5,
+      "title": "页内公式沙盒：包络宽度、主极大与缺级",
+      "body": [
+        "横坐标与两把标尺",
+        "x=\\frac{d\\sin\\theta}{\\lambda},\\quad r=\\frac{a}{d}",
+        "\\beta=\\pi rx,\\quad \\gamma=\\pi x",
+        "独立改动一个参数",
+        "操作",
+        "需要观察的位置",
+        "r：0.40→0.50",
+        "包络首个零点离中心多远",
+        "N：2→4→6",
+        "阵列因子的中心主峰宽度",
+        "r=0.50，查看 x=2",
+        "阵列主极大附近的总光强"
+      ],
+      "source": {
+        "name": "物理光学与光电子学：复振幅干涉、夫琅禾费衍射与电光调制实战",
+        "pageNumber": 5
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "formula",
+          "title": "横坐标与两把标尺",
+          "items": [
+            "x=\\frac{d\\sin\\theta}{\\lambda},\\quad r=\\frac{a}{d}",
+            "\\beta=\\pi rx,\\quad \\gamma=\\pi x"
+          ]
+        },
+        {
+          "type": "table",
+          "title": "独立改动一个参数",
+          "headers": [
+            "操作",
+            "需要观察的位置"
+          ],
+          "rows": [
+            [
+              "r：0.40→0.50",
+              "包络首个零点离中心多远"
+            ],
+            [
+              "N：2→4→6",
+              "阵列因子的中心主峰宽度"
+            ],
+            [
+              "r=0.50，查看 x=2",
+              "阵列主极大附近的总光强"
+            ]
+          ]
+        }
+      ],
+      "speakerNotes": "先在 r=0.50、N=4 锁定对照，再分别只调 r 和 N，让学生指认暗纹位置与峰宽各随哪个量改变。用 x=2 检验对缺级的解释。",
+      "interaction": {
+        "id": "harness-p5",
+        "activityId": "param-explorer@1",
+        "correctOptionId": "A",
+        "moduleConfig": {
+          "quickReasons": [
+            "首暗纹 r*x=±1，故 |x|=1/r",
+            "缝越宽，衍射角越大",
+            "N增大改变包络宽度"
+          ],
+          "takeaway": {
+            "formula": "\\lvert x_{\\mathrm{dark},1}\\rvert=\\frac{1}{r},\\quad x=\\frac{d\\sin\\theta}{\\lambda},\\quad r=\\frac{a}{d}",
+            "summary": "固定 d、λ 时，第一包络暗纹满足 |x|=1/r。增加 N 会收窄阵列因子的主峰。",
+            "pitfall": "缺级须同时满足 d sinθ=mλ、a sinθ=qλ，且 q≠0。"
+          },
+          "formulaDisplay": "\\frac{I}{I_0}=\\operatorname{sinc}^2(\\pi r x)\\left[\\frac{\\sin(N\\pi x)}{N\\sin(\\pi x)}\\right]^2",
+          "xAxis": {
+            "symbol": "x",
+            "label": "x = d sinθ / λ",
+            "min": -3,
+            "max": 3
+          },
+          "yAxis": {
+            "label": "归一化光强 I / I₀",
+            "min": 0,
+            "max": 1.05
+          },
+          "sliders": [
+            {
+              "symbol": "r",
+              "label": "缝宽比 a/d",
+              "min": 0.2,
+              "max": 0.9,
+              "step": 0.05,
+              "defaultValue": 0.5
+            },
+            {
+              "symbol": "N",
+              "label": "缝数 N（整数）",
+              "min": 2,
+              "max": 6,
+              "step": 1,
+              "defaultValue": 4
+            }
+          ],
+          "curves": [
+            {
+              "label": "衍射包络",
+              "expr": "sinc(r*x)^2"
+            },
+            {
+              "label": "多缝强度",
+              "expr": "sinc(r*x)^2*(N+2*((N-1)*cos(2*pi*x)+max(N-2,0)*cos(4*pi*x)+max(N-3,0)*cos(6*pi*x)+max(N-4,0)*cos(8*pi*x)+max(N-5,0)*cos(10*pi*x)))/N^2"
+            }
+          ],
+          "insightNote": "公式用 sinc(u)=sin(u)/u。引擎用归一化 sinc(z)=sin(πz)/(πz) 及有限余弦和，整数 x 处直接取正确极限。r=0.5 时，非零偶数级缺级。"
+        },
+        "evidenceIds": [
+          "M1",
+          "M2",
+          "M3",
+          "M4",
+          "M5",
+          "M6"
+        ],
+        "sourceEvidence": [
+          {
+            "id": "M1",
+            "quote": "横坐标与两把标尺"
+          },
+          {
+            "id": "M2",
+            "quote": "x=\\frac{d\\sin\\theta}{\\lambda},\\quad r=\\frac{a}{d}"
+          },
+          {
+            "id": "M3",
+            "quote": "\\beta=\\pi rx,\\quad \\gamma=\\pi x"
+          },
+          {
+            "id": "M4",
+            "quote": "独立改动一个参数"
+          },
+          {
+            "id": "M5",
+            "quote": "操作"
+          },
+          {
+            "id": "M6",
+            "quote": "需要观察的位置"
+          }
+        ],
+        "title": "单缝包络与多缝干涉因子",
+        "subject": "夫琅禾费衍射",
+        "description": "有限余弦和消除光栅因子的0/0奇点。",
+        "prompt": "固定缝距d，令 x=d sinθ/λ、r=a/d。增大缝宽比 r 时，单缝包络第一暗纹怎样变化？N取整数，对比2、4、6缝。",
+        "options": [
+          {
+            "id": "A",
+            "label": "第一暗纹向中心靠近，包络变窄"
+          },
+          {
+            "id": "B",
+            "label": "第一暗纹远离中心，包络变宽"
+          },
+          {
+            "id": "C",
+            "label": "改变N才会移动包络第一暗纹"
+          }
+        ],
+        "branches": [
+          {
+            "id": "mechanism",
+            "title": "用第一零点解释包络",
+            "description": "逐项展开本页机制，用原页条件检验首轮理由。",
+            "evidenceIds": [
+              "M1",
+              "M2",
+              "M3",
+              "M4",
+              "M5",
+              "M6"
+            ],
+            "revisionPrompt": "依据本页机制重新判断，写出支持你判断的具体条件。"
+          },
+          {
+            "id": "counterexample",
+            "title": "对比N与缝宽的独立作用",
+            "description": "构造一个边界反例，检查哪些结论需要附加条件。",
+            "evidenceIds": [
+              "M1",
+              "M2",
+              "M3",
+              "M4",
+              "M5",
+              "M6"
+            ],
+            "revisionPrompt": "用反例检验后改答，并指出原判断遗漏的条件。"
+          }
+        ],
+        "skills": [],
+        "steps": [],
+        "quickReasons": [
+          "首暗纹 r*x=±1，故 |x|=1/r",
+          "缝越宽，衍射角越大",
+          "N增大改变包络宽度"
+        ],
+        "takeaway": {
+          "pitfall": "缺级须同时满足 d sinθ=mλ、a sinθ=qλ，且 q≠0。",
+          "formula": "\\lvert x_{\\mathrm{dark},1}\\rvert=\\frac{1}{r},\\quad x=\\frac{d\\sin\\theta}{\\lambda},\\quad r=\\frac{a}{d}",
+          "summary": "固定 d、λ 时，第一包络暗纹满足 |x|=1/r。增加 N 会收窄阵列因子的主峰。"
+        }
+      }
+    },
+    {
+      "id": "page-6",
+      "number": 6,
+      "title": "MZM：电压 → 相位 → 输出功率",
+      "body": [
+        "电光驱动到输出端的传递链",
+        "驱动电压 V",
+        "电极建立电场",
+        "两臂折射率变化",
+        "推挽时相移相反",
+        "累积差分相移",
+        "Δφ = φ₂ − φ₁",
+        "合束与功率读出",
+        "A 口在 Δφ=0 时最亮",
+        "相移定义与理想平衡输出",
+        "\\delta n_j\\approx-\\frac{1}{2}n_j^3 r_{\\mathrm{eff}} E_j,\\quad \\delta\\varphi_j=\\frac{2\\pi L}{\\lambda_0}\\delta n_j",
+        "\\Delta\\varphi=\\Delta\\varphi_0+\\delta\\varphi_2-\\delta\\varphi_1,\\quad \\frac{I_A}{I_{\\mathrm{in}}}=\\frac{1+\\cos\\Delta\\varphi}{2}",
+        "半波电压",
+        "λ₀ 为真空波长。在线性驱动区 Δφ=Δφ₀+πV/Vπ，Vπ 对应 π 的差分相移，报告 VπL 时需注明驱动接法。"
+      ],
+      "source": {
+        "name": "物理光学与光电子学：复振幅干涉、夫琅禾费衍射与电光调制实战",
+        "pageNumber": 6
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "diagram",
+          "title": "电光驱动到输出端的传递链",
+          "kind": "flow",
+          "direction": "LR",
+          "nodes": [
+            {
+              "id": "drive",
+              "label": "驱动电压 V",
+              "sub": "电极建立电场",
+              "tone": "primary"
+            },
+            {
+              "id": "arms",
+              "label": "两臂折射率变化",
+              "sub": "推挽时相移相反",
+              "tone": "neutral"
+            },
+            {
+              "id": "phase",
+              "label": "累积差分相移",
+              "sub": "Δφ = φ₂ − φ₁",
+              "tone": "neutral"
+            },
+            {
+              "id": "combine",
+              "label": "合束与功率读出",
+              "sub": "A 口在 Δφ=0 时最亮",
+              "tone": "accent"
+            }
+          ],
+          "edges": [
+            {
+              "from": "drive",
+              "to": "arms"
+            },
+            {
+              "from": "arms",
+              "to": "phase"
+            },
+            {
+              "from": "phase",
+              "to": "combine"
+            }
+          ]
+        },
+        {
+          "type": "formula",
+          "title": "相移定义与理想平衡输出",
+          "items": [
+            "\\delta n_j\\approx-\\frac{1}{2}n_j^3 r_{\\mathrm{eff}} E_j,\\quad \\delta\\varphi_j=\\frac{2\\pi L}{\\lambda_0}\\delta n_j",
+            "\\Delta\\varphi=\\Delta\\varphi_0+\\delta\\varphi_2-\\delta\\varphi_1,\\quad \\frac{I_A}{I_{\\mathrm{in}}}=\\frac{1+\\cos\\Delta\\varphi}{2}"
+          ]
+        },
+        {
+          "type": "callout",
+          "title": "半波电压",
+          "text": "λ₀ 为真空波长。在线性驱动区 Δφ=Δφ₀+πV/Vπ，Vπ 对应 π 的差分相移，报告 VπL 时需注明驱动接法。",
+          "tone": "note"
+        }
+      ],
+      "speakerNotes": "从图中的单臂折射率变化推到两臂相减，明确推挽时两项为何同向贡献差分相移。请学生分别预测差分相位为 0 和 π 时 A 口的功率。"
+    },
+    {
+      "id": "page-7",
+      "number": 7,
+      "title": "直流偏置与小信号谐波展开",
+      "body": [
+        "小信号差分相移与两种偏置",
+        "\\Delta\\varphi(t)=\\varphi_0+m\\cos(\\Omega t),\\quad m\\ll 1",
+        "\\varphi_0=\\frac{\\pi}{2}:\\quad \\frac{I_A}{I_{\\mathrm{in}}}\\approx\\frac12-\\frac{m}{2}\\cos(\\Omega t)",
+        "\\varphi_0=\\pi:\\quad \\frac{I_A}{I_{\\mathrm{in}}}\\approx\\frac{m^2}{8}[1+\\cos(2\\Omega t)]",
+        "同一器件，两种用途",
+        "偏置",
+        "最低阶交流项",
+        "用途 / 失真",
+        "正交点",
+        "Ω，系数∝m",
+        "模拟线性调制；三阶项产生互调",
+        "谷底点",
+        "2Ω，系数∝m²",
+        "光子微波倍频；高阶有4Ω等",
+        "偏离谷底",
+        "重新出现Ω项",
+        "偏置漂移破坏基频抑制"
+      ],
+      "source": {
+        "name": "物理光学与光电子学：复振幅干涉、夫琅禾费衍射与电光调制实战",
+        "pageNumber": 7
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "formula",
+          "title": "小信号差分相移与两种偏置",
+          "items": [
+            "\\Delta\\varphi(t)=\\varphi_0+m\\cos(\\Omega t),\\quad m\\ll 1",
+            "\\varphi_0=\\frac{\\pi}{2}:\\quad \\frac{I_A}{I_{\\mathrm{in}}}\\approx\\frac12-\\frac{m}{2}\\cos(\\Omega t)",
+            "\\varphi_0=\\pi:\\quad \\frac{I_A}{I_{\\mathrm{in}}}\\approx\\frac{m^2}{8}[1+\\cos(2\\Omega t)]"
+          ]
+        },
+        {
+          "type": "table",
+          "title": "同一器件，两种用途",
+          "headers": [
+            "偏置",
+            "最低阶交流项",
+            "用途 / 失真"
+          ],
+          "rows": [
+            [
+              "正交点",
+              "Ω，系数∝m",
+              "模拟线性调制；三阶项产生互调"
+            ],
+            [
+              "谷底点",
+              "2Ω，系数∝m²",
+              "光子微波倍频；高阶有4Ω等"
+            ],
+            [
+              "偏离谷底",
+              "重新出现Ω项",
+              "偏置漂移破坏基频抑制"
+            ]
+          ]
+        }
+      ],
+      "speakerNotes": "在功率传输曲线上标出正交点与谷底，请大家先看斜率，再决定泰勒展开从哪一阶开始。用同一个 m 比较两处输出的交流频率和量级。"
+    },
+    {
+      "id": "page-8",
+      "number": 8,
+      "title": "工程误区：谷底偏置为什么会二倍频？",
+      "body": [
+        "半个驱动周期后相移扰动翻转",
+        "\\delta\\varphi(t)=m\\cos(\\Omega t),\\quad \\delta\\varphi\\!\\left(t+\\frac{\\pi}{\\Omega}\\right)=-\\delta\\varphi(t)",
+        "检验机制",
+        "设读出端为理想线性功率读出，比较谷底两侧等幅相移对光强的影响，再判断最低阶交流项。",
+        "适用条件",
+        "本题采用平衡双臂、谷底偏置和小信号近似。分析交流项时要去掉直流分量。"
+      ],
+      "source": {
+        "name": "物理光学与光电子学：复振幅干涉、夫琅禾费衍射与电光调制实战",
+        "pageNumber": 8
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "formula",
+          "title": "半个驱动周期后相移扰动翻转",
+          "items": [
+            "\\delta\\varphi(t)=m\\cos(\\Omega t),\\quad \\delta\\varphi\\!\\left(t+\\frac{\\pi}{\\Omega}\\right)=-\\delta\\varphi(t)"
+          ]
+        },
+        {
+          "type": "callout",
+          "title": "检验机制",
+          "text": "设读出端为理想线性功率读出，比较谷底两侧等幅相移对光强的影响，再判断最低阶交流项。",
+          "tone": "note"
+        },
+        {
+          "type": "callout",
+          "title": "适用条件",
+          "text": "本题采用平衡双臂、谷底偏置和小信号近似。分析交流项时要去掉直流分量。",
+          "tone": "warning"
+        }
+      ],
+      "speakerNotes": "公布首轮后，问同一驱动周期的正、负半周分别把工作点推到哪里。让学生对两侧等量偏移作比较，再用余弦平方恒等式说出最低阶频率。",
+      "interaction": {
+        "id": "harness-p8",
+        "activityId": "concept-diagnosis@1",
+        "correctOptionId": "A",
+        "moduleConfig": {
+          "quickReasons": [
+            "偶函数二次项与 cos² 恒等式",
+            "二极管削掉负半周",
+            "倍频来自电极长度增加"
+          ],
+          "takeaway": {
+            "summary": "I/Iin≈m²(1+cos2Ωt)/8：去掉直流后最低阶为2Ω。",
+            "pitfall": "“纯二倍频”只在理想小信号最低阶成立；较大m有4Ω等偶次谐波，偏置误差会引入基频。",
+            "formula": "\\frac{I_A}{I_{\\mathrm{in}}}\\approx\\frac{m^2}{8}[1+\\cos(2\\Omega t)]"
+          }
+        },
+        "evidenceIds": [
+          "M1",
+          "M2",
+          "M3",
+          "M4",
+          "M5",
+          "M6"
+        ],
+        "sourceEvidence": [
+          {
+            "id": "M1",
+            "quote": "半个驱动周期后相移扰动翻转"
+          },
+          {
+            "id": "M2",
+            "quote": "\\delta\\varphi(t)=m\\cos(\\Omega t),\\quad \\delta\\varphi\\!\\left(t+\\frac{\\pi}{\\Omega}\\right)=-\\delta\\varphi(t)"
+          },
+          {
+            "id": "M3",
+            "quote": "检验机制"
+          },
+          {
+            "id": "M4",
+            "quote": "设读出端为理想线性功率读出，比较谷底两侧等幅相移对光强的影响，再判断最低阶交流项。"
+          },
+          {
+            "id": "M5",
+            "quote": "适用条件"
+          },
+          {
+            "id": "M6",
+            "quote": "本题采用平衡双臂、谷底偏置和小信号近似。分析交流项时要去掉直流分量。"
+          }
+        ],
+        "title": "谷底偏置：二倍频的机制",
+        "subject": "大学课堂 · 双轮机制诊断",
+        "description": "先独立判断，再用证据修订。",
+        "prompt": "理想平衡MZM在谷底 φ₀=π，小信号相移 m cosΩt，平方律探测。为什么交流输出的最低阶是2Ω？",
+        "options": [
+          {
+            "id": "A",
+            "label": "传输在谷底关于相移为偶函数；二次项 cos²Ωt 含2Ω"
+          },
+          {
+            "id": "B",
+            "label": "光电二极管只保留正半周，所以削波整流"
+          },
+          {
+            "id": "C",
+            "label": "相位改变了载波光频两倍，因此直接读出2Ω"
+          },
+          {
+            "id": "D",
+            "label": "电极把输入电信号频率自动乘二"
+          }
+        ],
+        "branches": [
+          {
+            "id": "mechanism",
+            "title": "展开机制与状态",
+            "description": "逐项展开本页机制，用原页条件检验首轮理由。",
+            "evidenceIds": [
+              "M1",
+              "M2",
+              "M3",
+              "M4",
+              "M5",
+              "M6"
+            ],
+            "revisionPrompt": "依据本页机制重新判断，写出支持你判断的具体条件。"
+          },
+          {
+            "id": "counterexample",
+            "title": "检查边界与反例",
+            "description": "构造一个边界反例，检查哪些结论需要附加条件。",
+            "evidenceIds": [
+              "M1",
+              "M2",
+              "M3",
+              "M4",
+              "M5",
+              "M6"
+            ],
+            "revisionPrompt": "用反例检验后改答，并指出原判断遗漏的条件。"
+          }
+        ],
+        "skills": [],
+        "steps": [],
+        "quickReasons": [
+          "偶函数二次项与 cos² 恒等式",
+          "二极管削掉负半周",
+          "倍频来自电极长度增加"
+        ],
+        "takeaway": {
+          "pitfall": "“纯二倍频”只在理想小信号最低阶成立；较大m有4Ω等偶次谐波，偏置误差会引入基频。",
+          "formula": "\\frac{I_A}{I_{\\mathrm{in}}}\\approx\\frac{m^2}{8}[1+\\cos(2\\Omega t)]",
+          "summary": "I/Iin≈m²(1+cos2Ωt)/8：去掉直流后最低阶为2Ω。"
+        }
+      }
+    },
+    {
+      "id": "page-9",
+      "number": 9,
+      "title": "探测读出链路：RC 与 TFLN 行波速度匹配",
+      "body": [
+        "两个可独立估算的带宽约束",
+        "f_{\\mathrm{RC}}\\approx\\frac{1}{2\\pi R_{\\mathrm{eq}}(C_j+C_{\\mathrm{pad}}+C_{\\mathrm{in}})}",
+        "\\Delta\\varphi_{\\mathrm{RF}}\\approx\\frac{2\\pi fL}{c}(n_m-n_g)",
+        "指标无法单独优化",
+        "改动",
+        "收益",
+        "代价 / 检查",
+        "增大负载R",
+        "提高电压响应",
+        "RC带宽降低、噪声变化",
+        "缩小探测结面积",
+        "减小C_j",
+        "耦合容差、吸收效率",
+        "延长TFLN电极",
+        "降低驱动Vπ",
+        "微波损耗、失配累积",
+        "匹配n_m与n_g",
+        "减小走离",
+        "还需50Ω匹配与低衰减",
+        "研究讨论",
+        "VπL 很小不自动意味着带宽高。比较器件时同时列出波长、长度、驱动方式、插入损耗及3dB电光带宽。"
+      ],
+      "source": {
+        "name": "物理光学与光电子学：复振幅干涉、夫琅禾费衍射与电光调制实战",
+        "pageNumber": 9
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "formula",
+          "title": "两个可独立估算的带宽约束",
+          "items": [
+            "f_{\\mathrm{RC}}\\approx\\frac{1}{2\\pi R_{\\mathrm{eq}}(C_j+C_{\\mathrm{pad}}+C_{\\mathrm{in}})}",
+            "\\Delta\\varphi_{\\mathrm{RF}}\\approx\\frac{2\\pi fL}{c}(n_m-n_g)"
+          ]
+        },
+        {
+          "type": "table",
+          "title": "指标无法单独优化",
+          "headers": [
+            "改动",
+            "收益",
+            "代价 / 检查"
+          ],
+          "rows": [
+            [
+              "增大负载R",
+              "提高电压响应",
+              "RC带宽降低、噪声变化"
+            ],
+            [
+              "缩小探测结面积",
+              "减小C_j",
+              "耦合容差、吸收效率"
+            ],
+            [
+              "延长TFLN电极",
+              "降低驱动Vπ",
+              "微波损耗、失配累积"
+            ],
+            [
+              "匹配n_m与n_g",
+              "减小走离",
+              "还需50Ω匹配与低衰减"
+            ]
+          ]
+        },
+        {
+          "type": "callout",
+          "title": "研究讨论",
+          "text": "VπL 很小不自动意味着带宽高。比较器件时同时列出波长、长度、驱动方式、插入损耗及3dB电光带宽。",
+          "tone": "note"
+        }
+      ],
+      "speakerNotes": "先分开估算读出 RC 与调制器的走离：框出 R、C，再标出微波相位折射率和光群折射率。追问把电极加长后，驱动电压与高频响应各有什么变化。"
+    },
+    {
+      "id": "page-10",
+      "number": 10,
+      "title": "核心公式、符号约定与工程排障总表",
+      "body": [
+        "把公式与前提一起带走",
+        "任务",
+        "核心关系",
+        "先排查",
+        "复振幅",
+        "Ũ=Aeⁱφ；U=Re(Ũe⁻ⁱωt)",
+        "时间因子和相位符号一致",
+        "相干叠加",
+        "I=I₁+I₂+2√I₁I₂cosΔφ",
+        "偏振、相干性、归一化",
+        "损耗与ER",
+        "t=√T；ER=[(1+t)/(1−t)]²",
+        "功率dB用10log；振幅用20log",
+        "衍射 / 光栅",
+        "sinc²β × 阵列因子",
+        "中心极限、缺级、远场条件",
+        "MZM谐波",
+        "正交Ω；谷底最低阶2Ω",
+        "偏置、驱动幅度、高阶谐波",
+        "高速链路",
+        "RC + 传输线 + 渡越时间",
+        "不能拿一个指标代表全链路",
+        "阅读核对",
+        "复振幅符号按赵凯华、钟锡华《光学》的约定。远场衍射可对照 MIT 2.71 Optics 第 17 讲，调制谐波由本课的理想 MZM 传输式展开。"
+      ],
+      "source": {
+        "name": "物理光学与光电子学：复振幅干涉、夫琅禾费衍射与电光调制实战",
+        "pageNumber": 10
+      },
+      "adopted": [],
+      "blocks": [
+        {
+          "type": "table",
+          "title": "把公式与前提一起带走",
+          "headers": [
+            "任务",
+            "核心关系",
+            "先排查"
+          ],
+          "rows": [
+            [
+              "复振幅",
+              "Ũ=Aeⁱφ；U=Re(Ũe⁻ⁱωt)",
+              "时间因子和相位符号一致"
+            ],
+            [
+              "相干叠加",
+              "I=I₁+I₂+2√I₁I₂cosΔφ",
+              "偏振、相干性、归一化"
+            ],
+            [
+              "损耗与ER",
+              "t=√T；ER=[(1+t)/(1−t)]²",
+              "功率dB用10log；振幅用20log"
+            ],
+            [
+              "衍射 / 光栅",
+              "sinc²β × 阵列因子",
+              "中心极限、缺级、远场条件"
+            ],
+            [
+              "MZM谐波",
+              "正交Ω；谷底最低阶2Ω",
+              "偏置、驱动幅度、高阶谐波"
+            ],
+            [
+              "高速链路",
+              "RC + 传输线 + 渡越时间",
+              "不能拿一个指标代表全链路"
+            ]
+          ]
+        },
+        {
+          "type": "callout",
+          "title": "阅读核对",
+          "text": "复振幅符号按赵凯华、钟锡华《光学》的约定。远场衍射可对照 MIT 2.71 Optics 第 17 讲，调制谐波由本课的理想 MZM 传输式展开。",
+          "tone": "success"
+        }
+      ],
+      "speakerNotes": "给出“暗端有残余、某一级缺失、谷底出现基频”三个观测，让学生各自配对一个排查条件。用一句话复述时间因子和正向空间因子的符号。"
+    }
+  ]
+}

@@ -20,7 +20,7 @@ test('an edited score retains its material, slot IDs, and revision prompt', () =
 
 test('score import rejects unsupported versions and malformed records', () => {
   const portable = JSON.parse(exportScore(lessons[0]));
-  assert.throws(() => importScore(JSON.stringify({ ...portable, version: 2 })), /课谱版本/);
+  assert.throws(() => importScore(JSON.stringify({ ...portable, version: 2 })), /互动配置版本/);
   assert.throws(() => importScore(JSON.stringify({ ...portable, lesson: { ...portable.lesson, options: [] } })), /校验/);
   assert.throws(() => importScore('alert(1)'), /JSON/);
   assert.throws(() => importScore(' '.repeat(128001)), /大小/);

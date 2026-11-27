@@ -14,7 +14,7 @@ const input = {
   topic: '树荫是否影响气温',
   goal: '用同一时间的观测数据判断树荫的影响及证据限制',
   material: '上午十点，两处等高测点分别记录树荫处 26°C、日照处 30°C。下午未记录。',
-  reference: 'history',
+  reference: 'rc-fault',
 };
 
 const provider = {

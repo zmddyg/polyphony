@@ -3,30 +3,32 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>共演课堂实验</title>
+  <title>共演智课 · Polyphony V3.0 · 交互模组库</title>
   <link rel="icon" type="image/svg+xml" href="./assets/mark.svg">
+  <link rel="stylesheet" href="./studio.css">
+  <link rel="stylesheet" href="./views/lab.css">
   <link rel="stylesheet" href="./views/challenge-lab.css">
   <style>
     * {box-sizing:border-box}
-    body {min-height:100vh; margin:0; color:#1b3545; background:#f4f7f7; font:16px/1.5 "Segoe UI","Microsoft YaHei UI","Microsoft YaHei",sans-serif}
-    .cx-brandbar {background:white; border-bottom:1px solid #d3dee3}
+    body {min-height:100vh; margin:0; color:#E2E8F0; background:#060B16; font-variant-numeric:tabular-nums; font:16px/1.5 "PingFang SC","Noto Sans SC","Microsoft YaHei UI","Inter",system-ui,sans-serif}
+    .cx-brandbar {background:#0D1628; border-bottom:1px solid #1E304F}
     .cx-brandbar>div,.cx-preview {width:min(1260px,100% - 48px); margin-inline:auto}
     .cx-brandbar>div {display:flex; align-items:center; flex-wrap:wrap; justify-content:space-between; gap:14px; padding:15px 0}
     .cx-brandbar h1 {display:flex; gap:10px; align-items:center; margin:0; font-size:1.05rem; font-weight:680}
     .cx-brandbar h1 img {width:31px; height:31px}
-    .cx-brandbar nav {display:flex; gap:4px; background:#eff4f5; border-radius:10px; padding:3px}
-    .cx-brandbar a {padding:7px 13px; border:1px solid transparent; border-radius:7px; color:#526673; text-decoration:none; font-size:.91rem; font-weight:650}
-    .cx-brandbar a[aria-current="page"] {background:white; color:#105a77; border-color:#cbdce2}
+    .cx-brandbar nav {display:flex; gap:4px; background:#0D1628; border-radius:10px; padding:3px}
+    .cx-brandbar a {padding:7px 13px; border:1px solid transparent; border-radius:7px; color:#9FB4CC; text-decoration:none; font-size:.91rem; font-weight:650}
+    .cx-brandbar a[aria-current="page"] {background:#102C3D; color:#22D3EE; border-color:#1E304F}
     .cx-brandbar a:focus-visible {outline:3px solid #127ba5; outline-offset:3px}
     .cx-preview {padding:clamp(24px,5vw,65px) 0}
     @media(max-width:560px) {.cx-brandbar>div,.cx-preview {width:calc(100% - 28px)} .cx-brandbar>div {gap:8px}.cx-brandbar a {padding:7px 9px;font-size:.83rem}}
   </style>
 </head>
 <body>
-  <header class="cx-brandbar"><div><h1><img src="./assets/mark.svg" alt="">共演课堂实验</h1><nav aria-label="选择实验">
-    <a href="#light">曲线挑战</a><a href="#rc">只准测一次</a><a href="#blackbox">数字黑箱</a>
+  <header class="cx-brandbar"><div><h1><img src="./assets/mark.svg" alt="">共演智课 · 交互模组库</h1><nav aria-label="选择实验">
+    <a href="#optics">MZM 示波与谐波</a><a href="#rc">RC 一测排障</a><a href="#light">光子滤波谱盲测</a>
   </nav></div></header>
-  <main class="cx-preview"><section id="light" aria-label="曲线挑战"></section><section id="rc" aria-label="只准测一次" hidden></section><section id="blackbox" aria-label="数字黑箱" hidden></section></main>
+  <main class="cx-preview"><section id="optics" class="lab-screen" aria-label="MZM 实时示波台"></section><section id="light" aria-label="光子滤波谱盲测" hidden></section><section id="rc" aria-label="RC 一测排障" hidden></section><details class="cx-architecture"><summary>查看系统架构与防幻觉设计</summary><img src="./assets/architecture.svg" alt="共演智课系统架构" style="display:block;width:100%;height:auto"></details></main>
   <script type="module" src="./views/challenge-preview.mjs"></script>
 </body>
 </html>

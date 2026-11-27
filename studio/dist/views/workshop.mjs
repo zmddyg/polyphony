@@ -21,34 +21,55 @@ function createWorkshopState(options = {}) {
       state.storageStatus = '草稿仅保留在当前页面';
     }
   }
+  if (!lessons.some(lesson => lesson.id === draft.reference)) draft.reference = lessons[0].id;
   return state;
 }
 
 let standaloneWorkshop;
+let guardProof;
+
+function showGuardBadges(root, draft) {
+  const host = root.querySelector('[data-guard-badges]');
+  const trace = draft.trace;
+  const proof = trace ? Promise.resolve({ trace }) : (guardProof ??= rehearseComposition());
+  proof.then(({ trace }) => {
+    if (!host?.isConnected) return;
+    const repaired = trace.stages.some(stage => stage.id === 'validate' && stage.status === 'repaired');
+    const checked = trace.stages.some(stage => stage.id === 'validate' && ['ok', 'repaired'].includes(stage.status));
+    const passed = trace.checks?.rounds === 2;
+    const labels = [
+      [checked, '✓ 原页出处已锚定'],
+      [repaired, repaired ? '✓ 幻觉引文已拦截自修复' : '✓ 引文校核通过，本次无须修复'],
+      [passed, '✓ 双轮课堂状态机试跑通过'],
+    ];
+    // A normal valid generation need not fabricate an intercepted hallucination.
+    host.innerHTML = labels.map(([ok, label], i) => `<span data-guard="${ok || (i === 1 && checked) ? 'passed' : 'pending'}">${label}</span>`).join('');
+  }).catch(() => { if (host?.isConnected) host.textContent = '校核示例暂未完成，生成后请查看逐项记录。'; });
+}
 
 const compositionStages = [
-  { id: 'prepare', title: '整理材料', stack: 'JavaScript ES Modules', description: '按参考课例整理目标与材料。' },
-  { id: 'generate', title: '生成课谱', stack: 'Node.js HTTP · Chat Completions', description: '生成可编辑的题目和教学分支。' },
-  { id: 'validate', title: '校验引用', stack: 'JSON Schema · JavaScript', description: '检查字段、选项和材料编号。' },
-  { id: 'compile', title: '试运行', stack: 'ScorePackage v1 · 课堂状态机', description: '验证课谱回读、分支与两轮作答。' },
+  { id: 'prepare', title: '整理材料', stack: '① 原页语料编号', description: '按参考课例整理目标与材料。' },
+  { id: 'generate', title: '生成互动配置', stack: '② AI 结构化生成', description: '生成可编辑的题目和靶向教学策略。' },
+  { id: 'validate', title: '校验引用', stack: '③ 引文防幻觉拦截与自修复', description: '检查字段、选项和材料编号。' },
+  { id: 'compile', title: '试运行', stack: '④ 双轮课堂沙箱试跑', description: '验证互动配置回读、分支与两轮作答。' },
 ];
 const stageLabels = { ok: '通过', skipped: '跳过', failed: '未通过', repaired: '修复后通过' };
 const generationDetails = {
-  local: { stack: '本地 JavaScript 模板', description: '按参考课例套用探究活动模板。' },
-  rehearsal: { stack: '浏览器 · 模拟响应', description: '用固定回包演示校验与修复。' },
+  local: { stack: '② 离线快速生成', description: '按参考课例套用探究活动模板。' },
+  rehearsal: { stack: '② 防幻觉护栏演示', description: '用固定回包演示校验与修复。' },
 };
 const sourceLabels = {
   provider: '模型编排',
-  fallback: '本地模板 · 模型回退',
-  local: '本地模板',
-  rehearsal: '模拟编排',
-  imported: '已导入课谱',
+  fallback: '离线快速生成 · 模型回退',
+  local: '离线快速生成',
+  rehearsal: '防幻觉护栏演示',
+  imported: '已导入互动配置',
 };
 const operationLabels = {
-  model: '正在编排课谱并校验材料引用…',
-  local: '正在应用本地模板…',
-  rehearsal: '正在运行备课演示…',
-  import: '正在读取和校验课谱…',
+  model: '正在编排互动配置并校验材料引用…',
+  local: '正在应用离线快速生成…',
+  rehearsal: '正在演示：AI 幻觉拦截与自修复…',
+  import: '正在读取和校验互动配置…',
   publish: '正在创建课堂…',
 };
 const stages = [
@@ -105,7 +126,7 @@ function updateOperation(state) {
   root.querySelectorAll('[data-workshop-lock], .pw-inputs :is(select,input,textarea,button), .pw-score :is(input,textarea)').forEach(control => {
     control.disabled = Boolean(state.operation);
   });
-  const message = state.operation === 'publish' && state.onAdopt ? '正在采用这份互动课谱…' : operationLabels[state.operation];
+  const message = state.operation === 'publish' && state.onAdopt ? '正在采用这份随堂互动…' : operationLabels[state.operation];
   feedback(root, message);
 }
 
@@ -127,7 +148,7 @@ function renderEvidence(trace, score, e) {
   if (!trace.evidence?.length || !trace.materials?.length) return '';
   const materials = new Map(trace.materials.map(({ id, text }) => [id, text]));
   const branchTitles = new Map(score.branches.map(({ id, title }) => [id, title]));
-  return `<details class="pw-harness-evidence"><summary>生成时引用的材料 · ${trace.evidence.length} 条分支</summary>
+  return `<details class="pw-validation-evidence"><summary>生成时引用的材料 · ${trace.evidence.length} 条分支</summary>
     <ul>${trace.evidence.map(({ branchId, materialIds }) => `<li><strong>${e(branchTitles.get(branchId) ?? branchId)}</strong>
       ${materialIds.filter(id => materials.has(id)).map(id => `<blockquote><code>${e(id)}</code><span>${e(materials.get(id))}</span></blockquote>`).join('')}
     </li>`).join('')}</ul></details>`;
@@ -135,43 +156,43 @@ function renderEvidence(trace, score, e) {
 
 function renderChecks(trace, e) {
   if (!trace.checks || !trace.coverage) return '';
-  return `<dl class="pw-harness-checks">
-    <div><dt>活动接口</dt><dd><code>${e(trace.activityId)}</code></dd></div>
-    <div><dt>课谱交换</dt><dd>${trace.checks.scoreRoundTrip ? '导出、回读通过' : '未通过'}</dd></div>
+  return `<dl class="pw-validation-checks">
+    <div><dt>互动结构</dt><dd>选择、理由与靶向探究</dd></div>
+    <div><dt>互动配置交换</dt><dd>${trace.checks.scoreRoundTrip ? '导出、回读通过' : '未通过'}</dd></div>
     <div><dt>课堂试跑</dt><dd>${e(trace.checks.testedBranches)} 条分支 × ${e(trace.checks.rounds)} 轮</dd></div>
     <div><dt>材料编号覆盖</dt><dd>${e(trace.coverage.referenced)} / ${e(trace.coverage.available)}</dd></div>
   </dl>`;
 }
 
-function renderHarness(state, e, icon, aiOutputMode, canCompose) {
+function renderValidation(state, e, icon, aiOutputMode, canCompose) {
   const { draft, traceOpen } = state;
   const { trace } = draft;
   const route = trace ? draft.source : canCompose ? 'provider' : 'local';
   const results = new Map((trace?.stages ?? []).map(stage => [stage.id, stage]));
-  return `<details class="pw-harness" ${traceOpen ? 'open' : ''}>
-    <summary id="pw-harness-title"><span class="pw-summary-label">${icon('network', 19)}<strong>编排与校验记录</strong></span>
+  return `<details class="pw-validation" ${traceOpen ? 'open' : ''}>
+    <summary id="pw-validation-title"><span class="pw-summary-label">${icon('network', 19)}<strong>AI 防幻觉校核透视窗</strong></span>
       <span class="pw-summary-end"><span>${trace ? e(sourceLabels[draft.source] ?? sourceLabels.local) : '查看编排流程'}</span>${icon('chevron-down', 16)}</span>
     </summary>
-    <div class="pw-harness-body">
-      <ol class="pw-harness-stages" role="list">${compositionStages.map(definition => {
+    <div class="pw-validation-body">
+      <ol class="pw-validation-stages" role="list">${compositionStages.map(definition => {
         const generation = definition.id === 'generate' && generationDetails[route];
         const { id, title, stack, description } = { ...definition, ...generation };
         const stage = results.get(id);
         const status = Object.hasOwn(stageLabels, stage?.status) ? stage.status : '';
-        return `<li data-harness-stage="${id}"><h3>${title}</h3><p>${description}</p><code class="pw-harness-stack">${stack}</code>
-          ${id === 'generate' && (trace?.outputMode || aiOutputMode) && !generation ? `<small>${trace?.outputMode ? '本次请求' : '服务端模式'} <code>${e(trace?.outputMode ?? aiOutputMode)}</code></small>` : ''}
-          ${status ? `<div class="pw-harness-step-result"><span data-stage-status="${status}">${stageLabels[status]}</span><small>${formatDuration(stage.elapsedMs)}</small></div>` : ''}</li>`;
+        return `<li data-validation-stage="${id}"><h3>${title}</h3><p>${description}</p><code class="pw-validation-stack">${stack}</code>
+          
+          ${status ? `<div class="pw-validation-step-result"><span data-stage-status="${status}">${stageLabels[status]}</span><small>${formatDuration(stage.elapsedMs)}</small></div>` : ''}</li>`;
       }).join('')}</ol>
-      ${trace ? `<div class="pw-harness-receipt" aria-label="本次编排记录">
-        <div class="pw-harness-summary"><div><h3>${e(sourceLabels[draft.source] ?? sourceLabels.local)}</h3>
+      ${trace ? `<div class="pw-validation-receipt" aria-label="本次编排记录">
+        <div class="pw-validation-summary"><div><h3>${e(sourceLabels[draft.source] ?? sourceLabels.local)}</h3>
           <p>${trace.model ? e(trace.model) + ' · ' : ''}${trace.attempts > 0 ? (draft.source === 'rehearsal' ? '模拟调用 ' : '模型请求 ') + trace.attempts + ' 次 · ' : ''}耗时 ${formatDuration(trace.elapsedMs)}</p></div>
-          <button type="button" class="pw-button" data-harness-preview data-workshop-lock>${icon('smartphone', 16)}学生预览</button>
+          <button type="button" class="pw-button" data-validation-preview data-workshop-lock>${icon('smartphone', 16)}学生预览</button>
         </div>
-        <p class="pw-harness-edited" data-harness-edited ${draft.edited ? '' : 'hidden'}>课谱已由教师编辑。此处显示编排时的校验结果。</p>
-        ${draft.notice ? `<p class="pw-harness-notice">${e(draft.notice)}</p>` : ''}
-        ${trace.fallback?.validate === 'ok' && trace.fallback?.compile === 'ok' ? '<p class="pw-harness-notice">本地课谱已通过结构校验和课堂试跑。</p>' : ''}
+        <p class="pw-validation-edited" data-validation-edited ${draft.edited ? '' : 'hidden'}>互动配置已由教师编辑。此处显示编排时的校验结果。</p>
+        ${draft.notice ? `<p class="pw-validation-notice">${e(draft.notice)}</p>` : ''}
+        ${trace.fallback?.validate === 'ok' && trace.fallback?.compile === 'ok' ? '<p class="pw-validation-notice">本地互动配置已通过结构校验和课堂试跑。</p>' : ''}
         ${renderChecks(trace, e)}
-        ${trace.issues?.length ? `<ul class="pw-harness-issues">${trace.issues.map(({ attempt, message }) => `<li>第 ${e(attempt)} 次尝试 · ${e(message)}</li>`).join('')}</ul>` : ''}
+        ${trace.issues?.length ? `<ul class="pw-validation-issues">${trace.issues.map(({ attempt, message }) => `<li>第 ${e(attempt)} 次尝试 · ${e(message)}</li>`).join('')}</ul>` : ''}
         ${renderEvidence(trace, draft.score, e)}
       </div>` : ''}
     </div>
@@ -181,10 +202,10 @@ function renderHarness(state, e, icon, aiOutputMode, canCompose) {
 async function composeWithModel(ctx, input) {
   try {
     const result = await ctx.compose(input);
-    if (!result?.lesson || !['provider', 'fallback'].includes(result.source)) throw new Error('缺少课谱。');
+    if (!result?.lesson || !['provider', 'fallback'].includes(result.source)) throw new Error('缺少互动配置。');
     return result;
   } catch {
-    return { ...composeLocally(input), notice: '未收到模型服务的编排结果，浏览器已生成本地课谱。' };
+    return { ...composeLocally(input), notice: '未收到模型服务的编排结果，浏览器已生成本地互动配置。' };
   }
 }
 
@@ -227,11 +248,11 @@ async function runComposition(state, ctx, input, mode, compose) {
   }
   state.traceOpen = mode === 'rehearsal';
   const success = {
-    rehearsal: '备课演示完成，已生成可编辑的示例课谱。',
-    fallback: '已切换到本地模板，可以继续编辑课谱。',
+    rehearsal: '备课演示完成，已生成可编辑的示例互动配置。',
+    fallback: '已切换到离线快速生成，可以继续编辑互动配置。',
   };
-  refreshWorkshop(state, mode === 'rehearsal' ? '#pw-harness-title' : '[data-score="title"]',
-    result.notice || success[result.source] || '课谱已生成，可以编辑题目和教学分支。');
+  refreshWorkshop(state, mode === 'rehearsal' ? '#pw-validation-title' : '[data-score="title"]',
+    result.notice || success[result.source] || '互动配置已生成，可以编辑题目和靶向教学策略。');
 }
 
 function downloadJSON(text, filename) {
@@ -244,17 +265,16 @@ function downloadJSON(text, filename) {
 }
 
 function downloadScore(lesson, ctx) {
-  try { downloadJSON(exportScore(lesson), 'polyphony-score-' + lesson.id + '.json'); }
+  try { downloadJSON(exportScore(lesson), 'gongyan-activity-' + lesson.id + '.json'); }
   catch (error) { ctx.toast(error.message); }
 }
 
 function workshopEditor(score, e, icon) {
   if (!score) return `<div class="pw-editor-empty">
     <div class="pw-empty-art" aria-hidden="true"><span></span><span></span><span>${icon('workshop', 32)}</span></div>
-    <h3>还没有课谱</h3><p>填写备课材料并编排课谱，或导入已有的课谱。</p>
+    <h3>还没有互动配置</h3><p>填写备课材料并编排互动配置，或导入已有的互动配置。</p>
     <ol aria-label="课堂作答流程">${stages.map(stage => `<li>${icon(stage.icon, 16)}${stage.title}</li>`).join('')}</ol>
   </div>`;
-  const materialsMap = new Map((score.materials ?? []).map(item => [item.id, item.text]));
   return `<form class="pw-score" id="pw-score">
     <div class="pw-score-heading-fields">
       <label>课题名称<input data-score="title" value="${e(score.title)}" maxlength="100" required></label>
@@ -263,24 +283,16 @@ function workshopEditor(score, e, icon) {
     <label>学习目标<input data-score="description" value="${e(score.description)}" maxlength="500"></label>
     <fieldset><legend>初次作答</legend>
       <label>题目与材料<textarea data-score="prompt" rows="5" maxlength="2500" required>${e(score.prompt)}</textarea></label>
-      <div class="pw-option-fields">${score.options.map((option, index) => `<div class="pw-option-row">
-        <label><span class="pw-option-index" aria-hidden="true">${String.fromCharCode(65 + index)}</span><span class="visually-hidden">选项 ${String.fromCharCode(65 + index)}</span><input data-option="${index}" value="${e(option.label)}" maxlength="240" required></label>
-        ${score.options.length > 2 ? `<button type="button" class="pw-icon-button pw-remove-item" data-remove-option="${index}" aria-label="删除选项 ${String.fromCharCode(65 + index)}" title="删除选项">${icon('close', 15)}</button>` : ''}
-      </div>`).join('')}</div>
-      ${score.options.length < 6 ? `<button type="button" class="pw-text-button pw-add-item" data-add-option>${icon('plus', 15)}添加选项（当前 ${score.options.length}/6）</button>` : ''}
+      <div class="pw-option-fields">${score.options.map((option, index) => `<label><span class="pw-option-index" aria-hidden="true">${String.fromCharCode(65 + index)}</span><span class="visually-hidden">选项 ${String.fromCharCode(65 + index)}</span><input data-option="${index}" value="${e(option.label)}" maxlength="240" required></label>`).join('')}</div>
     </fieldset>
-    <fieldset><legend>教学分支</legend>${score.branches.map((branch, index) => `<details class="pw-branch" ${index === 0 ? 'open' : ''}>
+    <fieldset><legend>靶向教学策略</legend>${score.branches.map((branch, index) => `<details class="pw-branch" ${index === 0 ? 'open' : ''}>
       <summary><span class="pw-branch-index" aria-hidden="true">${index + 1}</span><span data-branch-label="${index}">${e(branch.title) || '分支 ' + (index + 1)}</span>${icon('chevron-down', 16)}</summary>
       <div class="pw-branch-fields">
         <label>分支标题<input data-branch="${index}" data-field="title" value="${e(branch.title)}" maxlength="120" required></label>
         <label>学生任务<textarea data-branch="${index}" data-field="description" rows="2" maxlength="700" required>${e(branch.description)}</textarea></label>
         <label>二次作答题目<span class="pw-field-note">留空时使用初答题目并提示学生结合新证据作答</span><textarea data-branch="${index}" data-field="revisionPrompt" rows="2" maxlength="700">${e(branch.revisionPrompt ?? '')}</textarea></label>
-        ${branch.evidenceIds?.length ? `<div class="pw-branch-evidence"><span>关联材料：</span>${branch.evidenceIds.map(id => `<code title="${e(materialsMap.get(id) ?? id)}">${e(id)}</code>`).join(' ')}</div>` : ''}
-        ${score.branches.length > 1 ? `<div class="pw-branch-footer"><button type="button" class="pw-text-button pw-danger-text" data-remove-branch="${index}">${icon('close', 14)}删除此分支</button></div>` : ''}
       </div>
-    </details>`).join('')}
-    ${score.branches.length < 5 ? `<button type="button" class="pw-text-button pw-add-item" data-add-branch>${icon('plus', 15)}添加教学分支（当前 ${score.branches.length}/5）</button>` : ''}
-    </fieldset>
+    </details>`).join('')}</fieldset>
   </form>`;
 }
 
@@ -318,7 +330,7 @@ function bindPreview(root, draft, e) {
   }
   tools.forEach(button => { button.onclick = () => showRound(Number(button.dataset.previewRound)); });
   select.onchange = () => showRound(2);
-  root.querySelectorAll('[data-preview], [data-harness-preview]').forEach(button => {
+  root.querySelectorAll('[data-preview], [data-validation-preview]').forEach(button => {
     button.onclick = () => {
       select.innerHTML = draft.score.branches.map((branch, index) => `<option value="${index}">${e(branch.title)}</option>`).join('');
       showRound(1);
@@ -336,55 +348,56 @@ function paintWorkshop(root, ctx, state) {
   const currentActivity = score && getActivity(score);
   root.innerHTML = `<div class="pw-view pw-prep">
     <header class="pw-heading">
-      <div><h1>${onAdopt ? '这一页的互动课谱' : 'AI 备课'}</h1><p class="pw-lead">${onAdopt ? e(state.pageLabel) : '把教学材料编排成可直接开课的互动课谱。'}</p></div>
+      <div><h1>${onAdopt ? '这一页的随堂互动' : '独立互动设计'}</h1><p class="pw-lead">${onAdopt ? e(state.pageLabel) : '把教学材料编排成可直接开课的随堂互动。'}</p></div>
       <div class="pw-header-actions">
         ${onAdopt ? '' : `<p class="pw-save-line">${icon('check', 15)}<span data-draft-status>${e(state.storageStatus)}</span></p>`}
         <div class="pw-actions">
-          ${onAdopt ? `<button class="pw-button" type="button" data-material-back>${icon('arrow-left', 16)}返回讲义备课</button>` : `
-            <button class="pw-button" type="button" data-material-link>${icon('book', 16)}讲义备课</button>
-            <button class="pw-button" type="button" data-rehearse data-workshop-lock>${icon('play', 16)}运行备课演示</button>`}
-          <button class="pw-button" type="button" data-import data-workshop-lock>${icon('download', 16)}导入课谱</button>
+          ${onAdopt ? `<button class="pw-button" type="button" data-material-back>${icon('arrow-left', 16)}返回课件活化</button>` : `
+            <button class="pw-button" type="button" data-material-link>${icon('book', 16)}课件活化</button>
+            <button class="pw-button" type="button" data-rehearse data-workshop-lock>${icon('play', 16)}演示：AI 幻觉拦截与自修复</button>`}
+          <button class="pw-button" type="button" data-import data-workshop-lock>${icon('download', 16)}导入互动配置</button>
           <input type="file" accept=".json,application/json" data-score-file hidden>
         </div>
       </div>
     </header>
+    <div class="pw-trust"><p>${draft.trace ? '当前生成记录的校核结果' : '内置样例实测的三重护栏；当前草稿生成后独立校核'}</p><div data-guard-badges aria-live="polite"></div></div>
     <div class="pw-feedback" role="status" aria-live="polite" data-workshop-feedback></div>
     <div class="pw-columns">
       <section class="pw-panel" aria-labelledby="pw-material-title">
         <header class="pw-panel-heading"><span class="pw-panel-icon">${icon('book', 20)}</span><h2 id="pw-material-title">备课材料</h2></header>
         <form class="pw-inputs">
           <label>参考课例<select name="reference">${lessons.map(lesson => `<option value="${e(lesson.id)}" ${lesson.id === draft.reference ? 'selected' : ''}>${e(lesson.subject)}</option>`).join('')}</select></label>
-          <label>课题<input name="topic" maxlength="100" required value="${e(draft.topic)}" placeholder="例如，城市里哪里更凉快？"></label>
-          <label>学习目标<input name="goal" maxlength="180" required value="${e(draft.goal)}" placeholder="例如，用观测数据判断树荫是否影响气温"></label>
+          <label>课题<input name="topic" maxlength="100" required value="${e(draft.topic)}" placeholder="例如，硅光调制器为何需要关注半波电压 Vπ？"></label>
+          <label>学习目标<input name="goal" maxlength="180" required value="${e(draft.goal)}" placeholder="例如，用双端口干涉能量公式解释偏置点与消光比变化"></label>
           <label>课堂材料<textarea name="material" rows="6" maxlength="2200" required placeholder="粘贴学生可直接阅读的记录、数据或文本">${e(draft.material)}</textarea></label>
           <p class="pw-character-count"><span data-material-length>${draft.material.length}</span> / 2200</p>
           <div class="pw-compose-actions">
-            <button class="pw-button ${canCompose ? '' : 'pw-primary'}" type="submit" data-local-compose>${icon('layers', 17)}${canCompose ? '使用本地模板' : '本地生成课谱'}</button>
+            <button class="pw-button ${canCompose ? '' : 'pw-primary'}" type="submit" data-local-compose>${icon('layers', 17)}离线快速生成</button>
             ${canCompose ? `<button class="pw-button pw-primary" type="submit" data-compose>${icon('sparkles', 17)}使用模型编排</button>` : ''}
           </div>
-          <p class="pw-field-note">${canCompose ? '使用模型时，课题、目标与材料会发送到已配置的模型服务。' : '本地模板可离线编排。连接已配置模型的课堂服务后，可使用模型编排。'}</p>
+          <p class="pw-field-note">${canCompose ? '使用模型时，课题、目标与材料会发送到已配置的模型服务。' : '离线快速生成可离线编排。连接已配置模型的课堂服务后，可使用模型编排。'}</p>
         </form>
       </section>
       <section class="pw-panel pw-editor-panel" aria-labelledby="pw-editor-title">
-        <header class="pw-panel-heading"><span class="pw-panel-icon">${icon('workshop', 20)}</span><div><h2 id="pw-editor-title">课堂课谱</h2>
+        <header class="pw-panel-heading"><span class="pw-panel-icon">${icon('workshop', 20)}</span><div><h2 id="pw-editor-title">互动设计</h2>
           <p>${score ? e(sourceLabels[draft.source] ?? sourceLabels.local) + ' · ' + score.options.length + ' 个选项 · ' + score.branches.length + ' 条分支' : '教师编辑与学生预览'}</p></div></header>
         ${score ? `<div class="pw-score-tools">
           <button class="pw-button pw-primary" type="submit" form="pw-score" data-workshop-lock>${onAdopt ? '加到讲授这一页' + icon('plus', 17) : '开设新课堂' + icon('arrow-up-right', 17)}</button>
           <button class="pw-button" type="button" data-preview data-workshop-lock>${icon('smartphone', 16)}学生预览</button>
-          <button class="pw-button" type="button" data-score-export data-workshop-lock>${icon('download', 16)}下载课谱</button>
+          <button class="pw-button" type="button" data-score-export data-workshop-lock>${icon('download', 16)}导出互动配置</button>
         </div>
         <div class="pw-editor-meta">${currentActivity ? `<span>${icon('layers', 14)}${e(currentActivity.title)}</span>` : ''}
           ${draft.trace ? '<button class="pw-text-button" type="button" data-review-trace>查看编排记录</button>' : ''}</div>` : ''}
         ${workshopEditor(score, e, icon)}
       </section>
     </div>
-    ${renderHarness(state, e, icon, ctx.aiOutputMode, canCompose)}
+    ${renderValidation(state, e, icon, ctx.aiOutputMode, canCompose)}
     ${onAdopt ? '' : `<section class="pw-template-library" aria-labelledby="pw-templates-title">
-      <header><h2 id="pw-templates-title">内置课例</h2><p>可直接开课，也可下载课谱后导入编辑。</p></header>
+      <header><h2 id="pw-templates-title">内置课例</h2><p>可直接开课，也可导出互动配置后导入编辑。</p></header>
       <div class="pw-catalog">${lessons.map(lesson => `<article>
         <p class="pw-template-subject">${icon('book', 16)}${e(lesson.subject)}</p><h3>${e(lesson.title)}</h3><p>${e(lesson.description)}</p>
         <div class="pw-actions"><button class="pw-button" type="button" data-builtin="${e(lesson.id)}" data-workshop-lock>开设这节课${icon('arrow-up-right', 16)}</button>
-          <button class="pw-icon-button" type="button" data-builtin-export="${e(lesson.id)}" aria-label="下载「${e(lesson.title)}」课谱" title="下载课谱">${icon('download', 18)}</button></div>
+          <button class="pw-icon-button" type="button" data-builtin-export="${e(lesson.id)}" aria-label="导出「${e(lesson.title)}」互动配置" title="导出互动配置">${icon('download', 18)}</button></div>
       </article>`).join('')}</div>
     </section>`}
     ${previewDialog(score, icon)}
@@ -397,6 +410,7 @@ function paintWorkshop(root, ctx, state) {
     </dialog>
   </div>`;
 
+  showGuardBadges(root, draft);
   const launch = async lesson => {
     if (state.operation) return;
     state.operation = 'publish';
@@ -405,7 +419,7 @@ function paintWorkshop(root, ctx, state) {
       if (onAdopt) await onAdopt(importScore(exportScore(lesson)), structuredClone(draft));
       else await ctx.startLesson(lesson);
     }
-    catch (error) { ctx.toast(error?.message || (onAdopt ? '采用课谱失败，请重试。' : '开设课堂失败，请重试。')); }
+    catch (error) { ctx.toast(error?.message || (onAdopt ? '采用互动配置失败，请重试。' : '开设课堂失败，请重试。')); }
     finally {
       state.operation = '';
       updateOperation(state);
@@ -413,16 +427,16 @@ function paintWorkshop(root, ctx, state) {
   };
   root.querySelector('[data-material-link]')?.addEventListener('click', () => ctx.go('materials'));
   root.querySelector('[data-material-back]')?.addEventListener('click', () => state.onBack());
-  const harness = root.querySelector('.pw-harness');
-  harness.ontoggle = () => { if (harness.isConnected) state.traceOpen = harness.open; };
+  const validation = root.querySelector('.pw-validation');
+  validation.ontoggle = () => { if (validation.isConnected) state.traceOpen = validation.open; };
   root.querySelector('[data-rehearse]')?.addEventListener('click', () => {
     const hasDraft = draft.score || [draft.topic, draft.goal, draft.material].some(value => value.trim());
-    requestReplacement(state, root, hasDraft ? '运行备课演示会用示例材料和课谱替换当前备课内容。' : '',
+    requestReplacement(state, root, hasDraft ? '演示：AI 幻觉拦截与自修复会用示例材料和互动配置替换当前备课内容。' : '',
       () => runComposition(state, ctx, REHEARSAL_INPUT, 'rehearsal', rehearseComposition));
   });
   root.querySelector('[data-review-trace]')?.addEventListener('click', () => {
-    harness.open = true;
-    harness.querySelector('summary').focus();
+    validation.open = true;
+    validation.querySelector('summary').focus();
   });
   root.querySelectorAll('[data-builtin]').forEach(button => {
     button.onclick = () => launch(lessons.find(lesson => lesson.id === button.dataset.builtin));
@@ -441,7 +455,7 @@ function paintWorkshop(root, ctx, state) {
     let lesson;
     let errorMessage;
     try {
-      if (file.size > 384000) throw new Error('课谱文件超过大小限制。');
+      if (file.size > 384000) throw new Error('互动配置文件超过大小限制。');
       lesson = importScore(await file.text());
       if (lessons.some(item => item.id === lesson.id)) lesson.id = 'custom-' + lesson.id + '-' + Date.now().toString(36);
     } catch (error) {
@@ -456,11 +470,11 @@ function paintWorkshop(root, ctx, state) {
       root.querySelector('[data-import]').focus({ preventScroll: true });
       return;
     }
-    requestReplacement(state, root, draft.score ? '导入「' + lesson.title + '」会替换当前编辑的课谱。' : '', () => {
+    requestReplacement(state, root, draft.score ? '导入「' + lesson.title + '」会替换当前编辑的互动配置。' : '', () => {
       Object.assign(draft, { score: lesson, source: 'imported', trace: null, notice: '', edited: false });
       state.traceOpen = false;
       persist(state);
-      refreshWorkshop(state, '[data-score="title"]', '课谱已导入，可以预览或继续编辑。');
+      refreshWorkshop(state, '[data-score="title"]', '互动配置已导入，可以预览或继续编辑。');
     });
   };
   const source = root.querySelector('.pw-inputs');
@@ -479,7 +493,7 @@ function paintWorkshop(root, ctx, state) {
     }
     const useModel = event.submitter?.hasAttribute('data-compose') && canCompose;
     const input = { topic: draft.topic, goal: draft.goal, material: draft.material, reference: draft.reference };
-    requestReplacement(state, root, draft.score ? '重新编排会替换现有题目、选项与教学分支。' : '', () =>
+    requestReplacement(state, root, draft.score ? '重新编排会替换现有题目、选项与靶向教学策略。' : '', () =>
       runComposition(state, ctx, input, useModel ? 'model' : 'local', useModel ? values => composeWithModel(ctx, values) : composeLocally));
   };
   updateOperation(state);
@@ -503,51 +517,15 @@ function paintWorkshop(root, ctx, state) {
     }
     if (draft.trace && !draft.edited) {
       draft.edited = true;
-      root.querySelector('[data-harness-edited]').hidden = false;
+      root.querySelector('[data-validation-edited]').hidden = false;
     }
     queueSave(state);
   };
-  const markEdited = () => {
-    if (draft.trace && !draft.edited) draft.edited = true;
-    persist(state);
-  };
-  editor.querySelector('[data-add-option]')?.addEventListener('click', () => {
-    if (state.operation || draft.score.options.length >= 6) return;
-    const id = 'opt-' + (draft.score.options.length + 1) + '-' + Date.now().toString(36).slice(-4);
-    draft.score.options.push({ id, label: '' });
-    markEdited();
-    refreshWorkshop(state, `[data-option="${draft.score.options.length - 1}"]`, '已添加新选项。');
-  });
-  editor.querySelectorAll('[data-remove-option]').forEach(button => {
-    button.onclick = () => {
-      if (state.operation || draft.score.options.length <= 2) return;
-      const idx = Number(button.dataset.removeOption);
-      draft.score.options.splice(idx, 1);
-      markEdited();
-      refreshWorkshop(state, `[data-option="${Math.max(0, idx - 1)}"]`, '已删除选项。');
-    };
-  });
-  editor.querySelector('[data-add-branch]')?.addEventListener('click', () => {
-    if (state.operation || draft.score.branches.length >= 5) return;
-    const id = 'branch-' + (draft.score.branches.length + 1) + '-' + Date.now().toString(36).slice(-4);
-    draft.score.branches.push({ id, title: '', description: '', revisionPrompt: '' });
-    markEdited();
-    refreshWorkshop(state, `[data-branch="${draft.score.branches.length - 1}"][data-field="title"]`, '已添加教学分支。');
-  });
-  editor.querySelectorAll('[data-remove-branch]').forEach(button => {
-    button.onclick = () => {
-      if (state.operation || draft.score.branches.length <= 1) return;
-      const idx = Number(button.dataset.removeBranch);
-      draft.score.branches.splice(idx, 1);
-      markEdited();
-      refreshWorkshop(state, '[data-score="title"]', '已删除教学分支。');
-    };
-  });
   editor.onsubmit = event => {
     event.preventDefault();
     const fields = [score.title, score.prompt, ...score.options.map(option => option.label),
       ...score.branches.flatMap(branch => [branch.title, branch.description])];
-    if (fields.some(value => !value.trim())) return ctx.toast('请填写课谱中的全部题目、选项和分支。');
+    if (fields.some(value => !value.trim())) return ctx.toast('请填写互动配置中的全部题目、选项和分支。');
     if (new Set(score.options.map(option => option.label.trim())).size !== score.options.length) {
       return ctx.toast('请为初答编写互不相同的选项。');
     }
@@ -577,5 +555,11 @@ export function renderWorkshop(root, ctx) {
 }
 
 export function renderMaterialWorkshop(root, ctx, options) {
-  paintWorkshop(root, ctx, createWorkshopState(options));
+  const state = createWorkshopState(options);
+  paintWorkshop(root, ctx, state);
+  if (options.autoGenerate) {
+    const input = { topic: state.draft.topic, goal: state.draft.goal, material: state.draft.material, reference: state.draft.reference };
+    const online = ctx.modelAvailable && typeof ctx.compose === 'function';
+    void runComposition(state, ctx, input, online ? 'model' : 'local', data => online ? composeWithModel(ctx, data) : composeLocally(data));
+  }
 }

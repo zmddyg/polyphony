@@ -5,10 +5,8 @@ import { exportScore, importScore } from './score-package.mjs';
 
 const stages = ['prepare', 'generate', 'validate', 'compile'];
 const materialLimit = 12;
-const minChoices = 2;
-const maxChoices = 4;
-const minBranches = 2;
-const maxBranches = 3;
+const choiceCount = 3;
+const branchCount = 3;
 const evidenceLimit = 3;
 const lengths = {
   subject: 80,
@@ -43,8 +41,8 @@ const branchSchema = objectSchema({
 export const COMPOSITION_PLAN_SCHEMA = objectSchema({
   subject: textSchema(lengths.subject),
   prompt: textSchema(lengths.prompt),
-  options: arraySchema(textSchema(lengths.option), 3, maxChoices),
-  branches: arraySchema(branchSchema, minBranches, maxBranches),
+  options: arraySchema(textSchema(lengths.option), choiceCount),
+  branches: arraySchema(branchSchema, branchCount),
 });
 export const COMPOSITION_REFUSED = Symbol('composition provider refusal');
 
@@ -86,13 +84,13 @@ function checkDistinct(values, label) {
 
 function validate(plan, input) {
   if (!exactKeys(plan, COMPOSITION_PLAN_SCHEMA.required)) {
-    throw new Error('课谱 JSON 须包含 subject、prompt、options、branches。');
+    throw new Error('互动配置 JSON 须包含 subject、prompt、options、branches。');
   }
   const subject = text(plan.subject, '学科', lengths.subject);
   const prompt = text(plan.prompt, '首答题', lengths.prompt);
-  if (!Array.isArray(plan.options) || plan.options.length < minChoices || plan.options.length > maxChoices ||
-      !Array.isArray(plan.branches) || plan.branches.length < minBranches || plan.branches.length > maxBranches) {
-    throw new Error(`需要 ${minChoices} 至 ${maxChoices} 个选项和 ${minBranches} 至 ${maxBranches} 条教学分支。`);
+  if (!Array.isArray(plan.options) || plan.options.length !== choiceCount ||
+      !Array.isArray(plan.branches) || plan.branches.length !== branchCount) {
+    throw new Error('需要三个选项和三个靶向教学策略。');
   }
   const options = plan.options.map((value, index) => text(value, '选项 ' + (index + 1), lengths.option));
   const knownIds = new Set(input.materials.map(({ id }) => id));
@@ -102,7 +100,8 @@ function validate(plan, input) {
     const ids = branch.evidenceIds;
     if (!Array.isArray(ids) || !ids.length || ids.length > evidenceLimit ||
         new Set(ids).size !== ids.length || ids.some(id => !knownIds.has(id))) {
-      throw new Error(label + '引用无效，请使用材料清单中 1 至 3 个不同的编号。');
+      const unknown = Array.isArray(ids) ? ids.filter(id => typeof id === 'string' && /^M\d{1,4}$/.test(id) && !knownIds.has(id)) : [];
+      throw new Error(label + '引用无效' + (unknown.length ? '（不存在：' + unknown.join('、') + '）' : '') + '，请使用材料清单中 1 至 3 个不同的编号。');
     }
     return {
       title: text(branch.title, label + '的标题', lengths.title),
@@ -163,10 +162,9 @@ function compile(plan, input) {
     subject: plan.subject,
     description: input.goal,
     prompt: plan.prompt + '\n\n课堂材料\n' + input.material,
-    materials: input.materials,
     options: plan.options.map((label, index) => ({ id: 'option-' + (index + 1), label })),
-    branches: plan.branches.map(({ title, description, revisionPrompt, evidenceIds }, index) =>
-      ({ id: 'branch-' + (index + 1), title, description, revisionPrompt, evidenceIds })),
+    branches: plan.branches.map(({ title, description, revisionPrompt }, index) =>
+      ({ id: 'branch-' + (index + 1), title, description, revisionPrompt })),
     skills: [input.goal],
     steps: ['独立作答并引用材料', '比较证据与解释', '按教师选择的分支核对，再次作答'],
   };
@@ -176,10 +174,12 @@ function compile(plan, input) {
 
 function localPlan({ topic, reference, materials }) {
   const options = {
-    mzi: ['我能用材料里的观测解释现象', '还有另一种解释符合现有观测', '需要加入对照再判断'],
-    history: ['记录直接支持这项主张', '记录只能支持范围较小的结论', '还需要独立来源来核对'],
-    blackbox: ['材料已有能够区分两种解释的证据', '两种解释都符合现有证据', '我能提出新的判别测试'],
+    mzi: ['谷底二次项导致倍频，振幅不等令静态 ER 有限', '谷底像二极管半波截断，能量相消后消失', '需要把静态 ER 与偏置谐波分别验证'],
+    'rc-fault': ['电压时频响应只约束 RC，初始电流可独立约束 R', '完整波特图与更多电压点能分别拟合 R 和 C', '需对两种故障写出同一探头的不同预测'],
+    'optical-aliasing': ['零训练误差只能证明相容，应选竞争预测分歧点盲测', '按最简原则，零训练误差就能证明真实周期', '应先扩展谱形模型再用独立采样检验'],
   };
+  const concept = /TFLN|行波电极|群折射率|VπL|速度失配/u.test(topic + materials.map(m => m.text).join(' '));
+  const specialized = /MZ[IM]|马赫|RC|光子滤波|消光比/u.test(topic + materials.map(m => m.text).join(' '));
   const firstId = materials[0].id;
   const lastId = materials.at(-1).id;
   const compareTask = firstId === lastId
@@ -188,7 +188,7 @@ function localPlan({ topic, reference, materials }) {
   return {
     subject: reference.subject.split(' · ')[0] + ' · 自编课',
     prompt: '围绕「' + topic + '」，阅读课堂材料，先独立选择一种判断。引用材料中的一处具体信息，说明它如何支持你的判断，以及它还不能回答什么。',
-    options: options[reference.id],
+    options: concept ? ['延长电极降低半波电压，但损耗和速度失配可能压低带宽', '只要把电极加长，驱动电压降低而带宽必然同时提高', '须核对微波损耗、阻抗与群速度匹配后才能比较方案'] : specialized ? options[reference.id] : ['原页在给定条件下支持这项判断，不能删去条件', '可以忽略给定条件，将结论推广到所有情况', '原页尚不足以排除竞争解释，须追加独立证据'],
     branches: [
       { title: '回到材料找证据', description: '从第一段材料中选一条信息，标出出处并说明它能支持哪一步判断。', revisionPrompt: '重新选择一种判断，引用一条材料信息，说明这条信息如何支持你的选择。', evidenceIds: [firstId] },
       { title: '并排比较两种解释', description: compareTask, revisionPrompt: '比较两种解释后重新判断。哪条材料最能区分它们？', evidenceIds: [...new Set([firstId, lastId])] },
@@ -250,13 +250,12 @@ export async function runComposition(input, { requestPlan, model, source = 'prov
   signal?.throwIfAborted();
   const { prepared, trace, stage, result, local } = start(input);
   if (model) trace.model = model;
-  let lastReply;
   for (let attempt = 1; attempt <= 2; attempt++) {
     const requestedAt = performance.now();
     trace.attempts = attempt;
     let reply;
     try {
-      reply = await requestPlan(prepared, trace.issues.at(-1)?.message, lastReply);
+      reply = await requestPlan(prepared, trace.issues.at(-1)?.message);
     } catch (error) {
       signal?.throwIfAborted();
       stage('generate', 'failed', requestedAt);
@@ -269,11 +268,10 @@ export async function runComposition(input, { requestPlan, model, source = 'prov
     signal?.throwIfAborted();
     if (reply === COMPOSITION_REFUSED) {
       stage('generate', 'failed', requestedAt);
-      trace.issues.push({ attempt, message: '模型未能提供可用课谱。' });
+      trace.issues.push({ attempt, message: '模型未能提供可用互动配置。' });
       break;
     }
     stage('generate', 'ok', requestedAt);
-    lastReply = typeof reply === 'string' ? reply : undefined;
 
     const validatesAt = performance.now();
     let plan;
@@ -296,7 +294,7 @@ export async function runComposition(input, { requestPlan, model, source = 'prov
       return result(compiled, source, plan);
     } catch {
       stage('compile', 'failed', compilesAt);
-      trace.issues.push({ attempt, message: '课谱未通过课堂试跑，请确认每个分支都包含有效的学生任务和复答题。' });
+      trace.issues.push({ attempt, message: '互动配置未通过课堂试跑，请确认每个分支都包含有效的学生任务和复答题。' });
     }
   }
   return local('fallback');
@@ -304,24 +302,23 @@ export async function runComposition(input, { requestPlan, model, source = 'prov
 
 export const REHEARSAL_INPUT = Object.freeze({
   reference: 'mzi',
-  topic: '干涉仪里，暗下去的光去了哪里？',
-  goal: '用不同相位下两端的读数检验光能消失与光能重新分配两种解释。',
-  material: '相位差为 0 时，A 端读数为 100，B 端为 0。\n相位差为 π 时，A 端读数为 0，B 端为 100。\n相位差为 π/2 时，A、B 两端读数均为 50。三次测量使用相同单位，入射光保持稳定。',
+  topic: 'TFLN 调制器：单臂损耗与行波电极速度失配',
+  goal: '区分静态 ER、偏置谐波和行波带宽三个约束，用原页编号材料核验工程折中。',
+  material: 'MZM 采用两只 50:50 耦合器，一臂功率透过率 T₂=0.5，振幅透过率为 √0.5，静态 ER≈15.31 dB。\n正交偏置的小信号基频非零；谷底偶函数二次项产生二倍频，不是二极管半波截断。\nTFLN 行波电极加长可降低 Vπ，但微波传播损耗和微波–光群速度失配可能压低带宽；需同时考虑阻抗匹配。',
 });
 
 export function rehearseComposition() {
   return runComposition(REHEARSAL_INPUT, {
     source: 'rehearsal',
     requestPlan: async (_input, repair) => JSON.stringify({
-      subject: '光学 · 干涉',
-      prompt: '从相位差 0 变到 π 后，A 端变暗。结合三次观测，哪种解释最符合双端读数？',
-      options: ['光能在相消时消失了', '光能在两个输出端之间重新分配', '只有一端的读数能作为判断依据'],
+      subject: '集成光子 · TFLN 电光调制',
+      prompt: '单臂损耗下静态 ER 有限。若进一步加长 TFLN 电极以降低 Vπ，下列哪项同时尊重静态与行波约束？',
+      options: ['延长电极必然同时提高带宽，谷底仍可完全相消', 'ER 由振幅和差约束，行波带宽还受微波损耗与速度失配约束', '谷底把负半周截掉，所以 ER 与带宽都是半波整流的结果'],
       branches: [
-        { title: '追踪两个出口', description: '把相位差 0 和 π 的 A、B 端读数分别相加，再比较两个总和。', revisionPrompt: '两个总和相同吗？用两组读数解释 A 端变暗。', evidenceIds: repair ? ['M1', 'M2'] : ['M99'] },
-        { title: '用中间相位检验解释', description: '先用你的解释预测中间相位下两个输出端的相对强弱，再与第三组读数比较。', revisionPrompt: '两个端口同时为 50 的观测，会怎样改变你的解释？', evidenceIds: ['M3'] },
-        { title: '讨论单端观测的局限', description: '先遮住相位差 π 时 B 端的读数，写出只凭 A 端可能得到的两种解释。再揭开 B 端。', revisionPrompt: '补看 B 端后，哪种解释失去支持？指出决定性读数。', evidenceIds: ['M2'] },
+        { title: '核对损耗与偏置的不同约束', description: '用第一段求峰谷比，用第二段的正交与谷底比较检验半波截断解释。', revisionPrompt: '引用两段材料，分别解释静态 ER 与倍频的机制。', evidenceIds: repair ? ['M1', 'M2'] : ['M99'] },
+        { title: '推导电极长度与带宽的折中', description: '从第三段列出延长电极改变的量，区分积累相移与高频相位失配。', revisionPrompt: '何种证据能判断加长后带宽是否下降？引用材料中的限制条件。', evidenceIds: ['M3'] },
+        { title: '设计一项区分两种失配的测量', description: '对照静态扫描与射频频响，说明哪个观测受臂间损耗影响，哪个还需传播模型。', revisionPrompt: '重新判断器件方案，指出原页已支持的结论与尚缺的测量。', evidenceIds: ['M1', 'M3'] },
       ],
     }),
   });
 }
-

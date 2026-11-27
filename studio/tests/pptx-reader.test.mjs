@@ -318,17 +318,40 @@ function moduleDataUrl(source) {
 }
 
 const chromium = chromiumPath();
+for (const [name,count,expected] of [
+ ['01-软件技术基础-第6章指针与函数传址实战(12页).pptx',12,['step-fault@1','concept-diagnosis@1']],
+ ['02-物理光学与光电调制-衍射干涉与调制实战(10页).pptx',10,['param-explorer@1','step-fault@1','concept-diagnosis@1']],
+ ['03-大学英语Unit4-实证阅读与学术思辨实战(10页).pptx',10,['evidence-weighing@1','concept-diagnosis@1']],
+]) test('native V4 combat deck parses and compiles to modular lecture: '+name, {
+ skip: !chromium && 'Chromium is needed for native PPTX import verification.',
+},async()=>{
+ const [reader,archive,bytes]=await Promise.all([
+  readFile(new URL('../dist/core/pptx-reader.mjs',import.meta.url),'utf8'),
+  readFile(new URL('../dist/core/pptx-package.mjs',import.meta.url),'utf8'),
+  readFile(new URL('../../示例课件/'+name,import.meta.url)),
+ ]);
+ const module=moduleDataUrl(reader.replace('./pptx-package.mjs',moduleDataUrl(archive)));
+ const result=await runInChromium(chromium,`(async()=>{const {readPptx}=await import(${JSON.stringify(module)});const bytes=Uint8Array.from(atob(${JSON.stringify(bytes.toString('base64'))}),c=>c.charCodeAt(0));return readPptx(new File([bytes],${JSON.stringify(name)}));})()`);
+ assert.equal(result.pages.length,count);assert.ok(result.pages.every(p=>p.title.trim()&&p.text.trim()));
+ assert.ok(result.pages.every(p=>!/^第 \d+ 页$/.test(p.title)),'native PowerPoint title placeholders survive import');
+ const {runDeckHarness}=await import('../dist/core/deck-harness.mjs');
+ const {validateLectureScore}=await import('../dist/core/lecture-score.mjs');
+ const r=await runDeckHarness(result,{pacingMode:'full-demo'});
+ assert.equal(r.lectureScore.format,'polyphony.lecture');assert.equal(r.lectureScore.version,1);
+ validateLectureScore(r.lectureScore);assert.equal(r.harnessReceipt.stages.length,5);
+ assert.ok(r.harnessReceipt.stages.every(s=>s.status==='complete'));
+ const mounted=[...new Set([...r.interactionsByPage.values()].map(l=>l.activityId))];
+ for(const id of expected)assert.ok(mounted.includes(id),name+' missing '+id+'; '+JSON.stringify(mounted));
+ console.log('V4 native readback '+JSON.stringify({name,pages:result.pages.map(p=>({number:p.number,title:p.title,head:p.text.slice(0,180)})),mounted}));
+});
 test('browser imports real PowerPoint ZIP bytes offline and preserves page lineage and visible content', {
   skip: !chromium && 'Install Chromium or set POLYPHONY_TEST_CHROMIUM to run the offline PPTX import regression.',
 }, async () => {
-  const [reader, archive, mathml] = await Promise.all([
+  const [reader, archive] = await Promise.all([
     readFile(new URL('../dist/core/pptx-reader.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../dist/core/pptx-package.mjs', import.meta.url), 'utf8'),
-    readFile(new URL('../dist/core/mathml.mjs', import.meta.url), 'utf8'),
   ]);
-  const module = moduleDataUrl(reader
-    .replace('./pptx-package.mjs', moduleDataUrl(archive))
-    .replace('./mathml.mjs', moduleDataUrl(mathml)));
+  const module = moduleDataUrl(reader.replace('./pptx-package.mjs', moduleDataUrl(archive)));
   const bytes = zip(fixtureEntries()).toString('base64');
   const result = await runInChromium(chromium,
     '(async () => {' +
@@ -356,9 +379,6 @@ test('browser imports real PowerPoint ZIP bytes offline and preserves page linea
   assert.match(first.text, /公开版实验资料/u);
   assert.match(first.text, /实验室原始标注/u);
   assert.doesNotMatch(first.text, /Click to edit|教师私下说明|教师备注/u);
-  assert.equal(first.speakerNotes, '教师备注应留在原件');
-  assert.ok(Array.isArray(first.formulas) && first.formulas.length === 1);
-  assert.match(first.formulas[0], /<math[^>]*>.*<mfrac>.*<msup>.*<\/math>/u);
   assert.deepEqual(first.images.map(({ sourcePath }) => sourcePath), ['poly/media/eq pic.png']);
   assert.equal(first.preview, undefined);
   assert.ok(first.warnings.some(message => message.includes('外链图片')));

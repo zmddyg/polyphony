@@ -36,7 +36,7 @@ export function esc(value) {
 
 // Keep the cascade in this order regardless of which view is opened first.
 export const viewStyles = [
-  'desk', 'workshop', 'lab', 'surfaces', 'student', 'replay', 'material-workspace',
+  'desk', 'workshop', 'lab', 'cognition', 'surfaces', 'student', 'replay', 'material-workspace',
   'material-notes', 'material-science', 'lecture-stage', 'lecture-room', 'challenge-lab',
 ];
 
