@@ -2,7 +2,7 @@ import { moduleHtml, bindModule } from './module-renderer.mjs';
 import { curveGraphic } from '../core/optics.mjs';
 import { getActivity } from '../core/activities.mjs';
 import { renderCognitionReport, renderContrastWall } from './cognition.mjs';
-import { formatFormulaHtml } from '../core/formula-text.mjs';
+import { renderRichMathHtml } from '../core/math-render.mjs';
 
 const phaseLabels = { collect: '收集中', reveal: '结果已公布', branch: '分支讨论', closed: '已结课' };
 const chartColors = ['#22D3EE', '#34D399', '#FBBF24', '#FB7185', '#A5F3FC'];
@@ -29,17 +29,17 @@ function summarize(state, collecting) {
   };
 }
 
-function choiceList(options, esc) {
+function choiceList(options) {
   return `<ol class="stage-choices" aria-label="作答选项">${options.map((option, index) => `
-    <li><span aria-hidden="true">${String.fromCharCode(65 + index)}</span><span>${esc(option.label)}</span></li>`).join('')}</ol>`;
+    <li><span aria-hidden="true">${String.fromCharCode(65 + index)}</span><span>${renderRichMathHtml(option.label)}</span></li>`).join('')}</ol>`;
 }
 
-function distribution({ count, options }, esc) {
+function distribution({ count, options }) {
   if (!count) return '<p class="stage-empty">本轮没有收到作答。</p>';
   return `<ol class="stage-distribution" aria-label="作答分布">${options.map((option, index) => {
     const percent = Math.round(option.count / count * 100);
     return `<li><span class="stage-option-letter" aria-hidden="true">${String.fromCharCode(65 + index)}</span>
-      <div class="stage-option-result"><span>${esc(option.label)}</span>
+      <div class="stage-option-result"><span>${renderRichMathHtml(option.label)}</span>
       <div class="stage-result-track" aria-hidden="true"><span style="--ratio:${option.count / count * 100}%;--bar:${chartColors[index % chartColors.length]}"></span></div></div>
       <div class="stage-result-count"><strong>${percent}%</strong><small>${option.count} 票</small></div></li>`;
   }).join('')}</ol>`;
@@ -87,18 +87,18 @@ export function renderStage(root, ctx) {
     : joining ? (ctx.mode === 'local' ? '请教师在同一浏览器打开学生端。' : '可扫码或凭课堂码加入。') : `本轮共收到 ${result.count} 份作答`;
   const reconnecting = ctx.mode === 'server' && ctx.connected === false;
   const regions = {
-    topic: `<div class="stage-meta"><span>${esc(lesson.subject || '课堂互动')}</span><span>第 ${round} 轮</span>${state.demo ? '<span class="stage-rehearsal">模拟班级演示</span>' : ''}</div>
-        <h1 id="stage-lesson">${esc(lesson.title)}</h1>
-        <p class="stage-prompt">${formatFormulaHtml(prompt)}</p>
-        ${lesson.activityId==='param-explorer@1'?'':moduleHtml(lesson,{...state,aiPeerRevealed:peerShown},{teacher:true})}${collecting ? choiceList(lesson.options, esc) : ''}
-        ${selectedBranch ? `<div class="stage-decision"><span>讨论方向</span><strong>${esc(selectedBranch.title)}</strong>${state.phase === 'branch' ? `<p>${esc(selectedBranch.description)}</p>` : ''}</div>` : ''}`,
+    topic: `<div class="stage-meta"><span>${renderRichMathHtml(lesson.subject || '课堂互动')}</span><span>第 ${round} 轮</span>${state.demo ? '<span class="stage-rehearsal">模拟班级演示</span>' : ''}</div>
+        <h1 id="stage-lesson">${renderRichMathHtml(lesson.title)}</h1>
+        <p class="stage-prompt">${renderRichMathHtml(prompt)}</p>
+        ${lesson.activityId==='param-explorer@1'?'':moduleHtml(lesson,{...state,aiPeerRevealed:peerShown},{teacher:true})}${collecting ? choiceList(lesson.options) : ''}
+        ${selectedBranch ? `<div class="stage-decision"><span>讨论方向</span><strong>${renderRichMathHtml(selectedBranch.title)}</strong>${state.phase === 'branch' ? `<p>${renderRichMathHtml(selectedBranch.description)}</p>` : ''}</div>` : ''}`,
     heading: `<h2 id="stage-panel-title">${isInterference ? '全班干涉曲线' : collecting ? '作答进度' : '作答分布'}</h2>
         <span class="stage-phase" data-phase="${esc(state.phase)}"><i aria-hidden="true"></i>${phaseLabels[state.phase] || ''}</span>`,
     plot: lesson.activityId==='param-explorer@1'?moduleHtml(lesson,state):isInterference ? stageCurve(state, collecting) : '',
     result: (isInterference && !collecting ? '<h3 class="stage-distribution-title">选项分布</h3>' : '') +
-      (collecting ? participation(result.count, state.participants.length, isInterference) : distribution(result, esc)),
+      (collecting ? participation(result.count, state.participants.length, isInterference) : distribution(result)),
     footer,
-    highlights: renderContrastWall(state, esc) + renderCognitionReport(state, esc),
+    highlights: renderContrastWall(state) + renderCognitionReport(state),
   };
   let stage = renderedStages.get(root.firstElementChild);
   if (!stage || stage.code !== state.code) {

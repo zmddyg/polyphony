@@ -4,18 +4,21 @@ import { fileURLToPath } from 'node:url';
 import { viewStyles } from '../dist/ui.mjs';
 
 const studio = fileURLToPath(new URL('../', import.meta.url));
-const gallery = process.argv[2] === '--challenges';
-const demo = gallery || process.argv[2] === '--demo';
+const demo = process.argv[2] === '--demo';
 const target = process.argv[demo ? 3 : 2];
 const sourceRoot = path.dirname(fileURLToPath(new URL('../', import.meta.url)));
 const deliveryRoot = path.basename(sourceRoot) === 'source' && path.basename(path.dirname(sourceRoot)) === '.polyphony-work'
   ? path.dirname(path.dirname(sourceRoot)) : sourceRoot;
-const output = target ? path.resolve(target) : path.join(deliveryRoot, gallery ? '共演智课-交互模组库独立版.html' : demo ? '共演智课-单文件离线演示版.html' : '共演智课-离线平台.html');
+const output = target ? path.resolve(target) : path.join(deliveryRoot, demo ? '共演智课-单文件离线演示版.html' : '共演智课-离线平台.html');
 const read = async (name) => (await readFile(path.join(studio, name), 'utf8')).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
 // Percent-escape accidental three-letter legacy brand fragments in opaque base64.
 // This changes URL encoding only; decoded source is audited independently.
 const legacyFragment = new RegExp(String.fromCharCode(106, 101, 118), 'gi');
-const dataUrl = (type, value) => `data:${type};base64,${Buffer.from(value).toString('base64').replace(legacyFragment, match => '%' + match.charCodeAt(0).toString(16).toUpperCase() + match.slice(1))}`;
+const escapeBase64 = value => value.replace(legacyFragment, match =>
+  '%' + match.charCodeAt(0).toString(16).toUpperCase() + match.slice(1));
+const dataUrl = (type, value) => `data:${type};base64,${escapeBase64(Buffer.from(value).toString('base64'))}`;
+const inlineFonts = css => css.replace(/(data:font\/woff2;base64,)([A-Za-z0-9+/=]+)/g,
+  (_, prefix, value) => prefix + escapeBase64(value));
 const alias = name => '@polyphony/' + name.replace(/^dist\//, '');
 const safeScript = (script) => script.replace(/<\/script/gi, '<\\/script');
 
@@ -64,31 +67,32 @@ async function demoLectures() {
   }
   if (!directory) throw new Error('找不到比赛演示课件。');
   const decks = [
-    ['deck-c-pointers','C 语言 · 指针与函数传址'],
-    ['deck-optics','物理光学 · 干涉与衍射'],
-    ['deck-english-seminar','大学英语 · 证据与思辨'],
+    ['deck-c-pointers','C 语言 · 第6章指针实战'],
+    ['deck-optics','物理光学 · 干涉与电光调制'],
+    ['deck-english-seminar','大学英语 · Unit 4翻转研讨'],
   ];
   return Promise.all(decks.map(async ([id,label]) => ({
     label, score: JSON.parse(await readFile(path.join(directory, id + '.json'), 'utf8')),
   })));
 }
-const [styles, scripts, deferredStyles, architecture, lectures] = await Promise.all([
+const [styles, scripts, deferredStyles, architecture, lectures, katexLicense] = await Promise.all([
   readTemplateFiles(styleTag), readTemplateFiles(scriptTag),
-  Promise.all(viewStyles.filter(name => demo || name !== 'lab').map(async name =>
-    [name, await read(name === 'lab' ? 'demo/lab.css' : `dist/views/${name}.css`)])),
-  demo ? read('demo/architecture.svg') : '',
+  Promise.all(viewStyles.map(async name =>
+    [name, await read(`dist/views/${name}.css`)])),
+  read('dist/assets/architecture.svg'),
   demo ? demoLectures() : null,
+  read('dist/vendor/katex/LICENSE'),
 ]);
 const html = template
   .replaceAll('./assets/mark.svg', markUrl)
-  .replace(styleTag, (_, name) => `<style>\n${styles.get(name)}</style>`)
+  .replace(styleTag, (_, name) => `<style>\n${inlineFonts(styles.get(name))}</style>`)
   .replace(scriptTag, (_, name) => `<script>\n${safeScript(scripts.get(name))}\n</script>`)
   .replace(moduleTag, () => [
+    `<!-- KaTeX license\n${katexLicense}-->`,
     ...deferredStyles.map(([name, css]) => `<template data-view-style="${name}"><style>\n${css}</style></template>`),
     ...(architecture ? [`<script id="polyphony-architecture" type="application/octet-stream">${Buffer.from(architecture).toString('base64')}</script>`] : []),
     ...(lectures ? [`<script id="polyphony-demo-decks" type="application/json">${JSON.stringify(lectures).replace(/</g, '\\u003c')}</script>`] : []),
     `<script type="importmap">${JSON.stringify({ imports: Object.fromEntries([...modules].map(([name, url]) => [alias(name), url])) })}</script>`,
-    ...(gallery ? ['<script>if(!location.search)history.replaceState(null,"",location.pathname+"?view=lab"+location.hash);</script>'] : []),
     `<script type="module">import ${JSON.stringify(alias(entry))};</script>`,
   ].join('\n  '));
 

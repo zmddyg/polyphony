@@ -306,7 +306,17 @@ export function createMaterialNotebook({ indexedDB, databaseName = defaultDataba
   }
 
   return {
+    async deleteVersion(versionId) {
+      checkVersionId(versionId);
+      return run(['versions', 'documents', 'notes', 'classrooms'], 'readwrite', async stores => {
+        const keys = await Promise.all(['notes','classrooms'].map(async name => [name, await readRequest(stores[name].getAll())]));
+        await Promise.all([readRequest(stores.versions.delete(versionId)),readRequest(stores.documents.delete(versionId)),
+          ...keys.flatMap(([name,records])=>records.filter(r=>r.versionId===versionId).map(r=>readRequest(stores[name].delete(name==='notes'?[versionId,r.pageNumber,r.id]:[versionId,r.pageNumber]))))]);
+      });
+    },
     async saveVersion(input) {
+      input = structuredClone(input);
+      if(input.draft) input.draft.speakerNotes = Object.fromEntries(input.pages.map(p=>[p.number,p.speakerNotes ?? input.draft.speakerNotes?.[p.number] ?? '']));
       const { versionId, pages, name = input.title, title = name, type = input.kind, file = null, warnings = [] } = input;
       checkVersionId(versionId);
       if (!Array.isArray(pages) || !pages.length || typeof name !== 'string' || !name.trim()) {
@@ -323,6 +333,7 @@ export function createMaterialNotebook({ indexedDB, databaseName = defaultDataba
           if (!document) throw new Error('已保存的课件无法打开。');
           if (Object.hasOwn(input, 'draft')) {
             document.draft = input.draft;
+            document.pages = document.pages.map(p=>({...p,speakerNotes:input.draft?.speakerNotes?.[p.number] ?? p.speakerNotes ?? ''}));
             await readRequest(documents.put(document));
           }
           const version = { ...existing, openedAt };
@@ -349,7 +360,7 @@ export function createMaterialNotebook({ indexedDB, databaseName = defaultDataba
         const [version, document] = await Promise.all([
           readRequest(versions.get(versionId)), readRequest(documents.get(versionId)),
         ]);
-        return version && document ? { ...document, ...version } : null;
+        return version && document ? { ...document, ...version, pages:document.pages.map(p=>({...p,speakerNotes:document.draft?.speakerNotes?.[p.number] ?? p.speakerNotes ?? ''})) } : null;
       });
     },
     async setLastPage(versionId, pageNumber) {

@@ -5,7 +5,7 @@
   "source": {
     "name": "大学英语 Unit 4：实证阅读、学术审慎语与思辨交锋",
     "kind": "native",
-    "versionId": "sha256-0e7b5543514dd26e24f1dea876629e05b3206f759e516779970167ddfa3393c3"
+    "versionId": "sha256-6f413add18b4989245a95cd7465c8328a5497dfc63140e75c2fadbb9b54aec4f"
   },
   "pages": [
     {
@@ -55,7 +55,7 @@
           "tone": "warning"
         }
       ],
-      "speakerNotes": "先讲解本页结构，再让学生独立判断。保留条件与适用范围；双轮改答后总结机制。"
+      "speakerNotes": "先让两位学生读出同一句观察和解释，请全班找出哪一句可直接从表里看到。提醒今天所有数字都是供练习的模拟样本。"
     },
     {
       "id": "page-2",
@@ -138,7 +138,7 @@
           "tone": "note"
         }
       ],
-      "speakerNotes": "先讲解本页结构，再让学生独立判断。保留条件与适用范围；双轮改答后总结机制。"
+      "speakerNotes": "用 Compared ≥3 sellers 那行练习读出 62% 与 49% 的差值，请学生用 percentage points 口述 13 个百分点。接着问比较次数能回答关于比较质量的什么问题。"
     },
     {
       "id": "page-3",
@@ -216,7 +216,7 @@
           "tone": "warning"
         }
       ],
-      "speakerNotes": "先讲解本页结构，再让学生独立判断。保留条件与适用范围；双轮改答后总结机制。"
+      "speakerNotes": "从同一组差异出发，请两组各写一个理论能够预测且可被推翻的结果。交换检查文化或收入变化时预测是否仍成立。"
     },
     {
       "id": "page-4",
@@ -270,7 +270,7 @@
           "tone": "note"
         }
       ],
-      "speakerNotes": "先讲解本页结构，再让学生独立判断。保留条件与适用范围；双轮改答后总结机制。",
+      "speakerNotes": "投票前把 in this sample 写到黑板上。公布后让学生圈出 overclaim 的范围词，再挑一个与调查设计相称的审慎动词。",
       "interaction": {
         "id": "harness-p4",
         "activityId": "concept-diagnosis@1",
@@ -461,7 +461,7 @@
           "tone": "success"
         }
       ],
-      "speakerNotes": "先讲解本页结构，再让学生独立判断。保留条件与适用范围；双轮改答后总结机制。"
+      "speakerNotes": "让学生用 in line with 连接观察与假设，再用 nevertheless 引出具体限制。请另一位学生用 at the expense of 说出一项可以检验的政策代价。"
     },
     {
       "id": "page-6",
@@ -554,7 +554,7 @@
           "tone": "note"
         }
       ],
-      "speakerNotes": "先讲解本页结构，再让学生独立判断。保留条件与适用范围；双轮改答后总结机制。"
+      "speakerNotes": "让学生分别解释 47% 的分母与 0.91 比较的是哪两组的 odds。追问若出版类型分布变化，现有表格能支持怎样的结论。"
     },
     {
       "id": "page-7",
@@ -608,7 +608,7 @@
           ]
         }
       ],
-      "speakerNotes": "先讲解本页结构，再让学生独立判断。保留条件与适用范围；双轮改答后总结机制。",
+      "speakerNotes": "先按行标记推断对象，找出从 group average 换成 every individual 的第一处。改答时要求说清需要补哪类个体证据。",
       "interaction": {
         "id": "harness-p7",
         "activityId": "step-fault@1",
@@ -792,7 +792,7 @@
           "tone": "note"
         }
       ],
-      "speakerNotes": "先讲解本页结构，再让学生独立判断。保留条件与适用范围；双轮改答后总结机制。",
+      "speakerNotes": "先收齐每人自己的方案和一条证据，再打开盲盒辩友。请学生指出成本论证漏掉的一项准则，并设计能测量效果的小范围试点。",
       "interaction": {
         "id": "harness-p8",
         "activityId": "evidence-weighing@1",
@@ -986,7 +986,7 @@
           "tone": "success"
         }
       ],
-      "speakerNotes": "先讲解本页结构，再让学生独立判断。保留条件与适用范围；双轮改答后总结机制。"
+      "speakerNotes": "把同一条样本证据分别放进逐点对比和分块对比的大纲里。请同伴检查哪一句解释了数据如何支持主张，并改写含糊的一处。"
     },
     {
       "id": "page-10",
@@ -1064,7 +1064,7 @@
           "tone": "success"
         }
       ],
-      "speakerNotes": "先讲解本页结构，再让学生独立判断。保留条件与适用范围；双轮改答后总结机制。"
+      "speakerNotes": "请每人交一句带证据范围和不确定性的退场句，再补一条愿意据以改判的新证据。抽两句复核主张、语气和证据的对应。"
     }
   ]
 }

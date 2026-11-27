@@ -70,7 +70,7 @@
 }
 .stage-topic, .stage-panel { min-width: 0; }
 .stage-meta { display: flex; flex-wrap: wrap; gap: 8px; }
-.stage-meta span, .stage-phase {
+.stage-meta > span, .stage-phase {
   border-radius: 6px;
   border: 1px solid #527D8C;
   padding: 5px 8px;
@@ -108,7 +108,7 @@
   font: 700 .95em var(--mono);
 }
 .stage-decision { display: grid; gap: 5px; margin-top: 20px; padding: 10px 14px; border-left: 3px solid var(--stage-accent); border-radius: 0 7px 7px 0; background: #224450; overflow-wrap: anywhere; }
-.stage-decision span { color: var(--stage-secondary); font-size: .83rem; }
+.stage-decision > span { color: var(--stage-secondary); font-size: .83rem; }
 .stage-decision strong { color: #DBEFF7; font-size: clamp(1.05rem, 1.7vw, 1.6rem); }
 .stage-decision p { margin: 1px 0 0; color: var(--stage-secondary); line-height: 1.5; white-space: pre-line; }
 .stage-panel { padding: clamp(16px, 2.1vw, 32px); border: 1px solid var(--stage-line); border-radius: 10px; background: var(--stage-panel); box-shadow: 0 12px 35px #081C243d; }
@@ -193,7 +193,7 @@
 .stage-response-count progress::-webkit-progress-value { background: var(--laser-cyan); }
 .stage-response-count progress::-moz-progress-bar { background: var(--laser-cyan); }
 .stage-control { border-radius: 6px; }
-.stage-meta span, .stage-phase { border-radius: 4px; }
+.stage-meta > span, .stage-phase { border-radius: 4px; }
 .stage-highlights{max-width:1760px;padding:0 clamp(18px,4vw,62px) 24px;margin:auto}
 .stage-highlights:empty{display:none}
 .has-highlights .stage-body{min-height:0;align-items:start;padding-block:24px;gap:32px}

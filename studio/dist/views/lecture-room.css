@@ -6,3 +6,24 @@
 #surface:fullscreen{background:#F4F9FB;overflow:auto;width:100vw;height:100vh}.lecture-backbar{justify-content:space-between}
 @media(max-width:640px){.lecture-room-bar,.lecture-pager{padding:8px 0;gap:6px}.lecture-bar-actions{gap:4px}.lecture-room-bar button,.lecture-pager button{font-size:.85rem}.lecture-frame{border-radius:8px}}
 .lecture-pager [data-lecture-action=interact]{background:#22D3EE;border-color:#67E8F9;color:#060B16;font-weight:750}.lecture-pager [data-lecture-action=experiment]{background:#34D399;border-color:#6EE7B7;color:#060B16;font-weight:750}.lecture-pager [data-lecture-action=interact]:hover{background:#67E8F9}.lecture-pager [data-lecture-action=experiment]:hover{background:#6EE7B7}.lecture-pager{flex-wrap:wrap}
+
+.private-triage { margin-top: 7px; font-size: 13px; overflow-wrap: anywhere; }
+.private-triage .private-triage-button {
+  padding: 8px 12px; min-height: 40px; border: 1px solid #80b9b5; border-radius: 8px;
+  background: #e3f4f0; color: #173c4a; font: inherit; font-weight: 650;
+}
+.private-triage-button:focus-visible { outline: 3px solid #79bcd6; outline-offset: 2px; }
+.private-triage-button:disabled { opacity: .55; }
+.private-triage [data-triage-status] { margin-inline-start: .65em; font-size: 12px; }
+.private-triage ol { padding-inline-start: 1.5em; margin: .5em 0 0; line-height: 1.55; }
+.private-triage ol:empty { margin: 0; }
+.native-player--remote .private-triage-button { min-height: 44px; }
+
+.native-review-download {
+  min-height: 44px; max-width: 100%; padding: 8px 12px;
+  border: 1px solid #4b928e; border-radius: 8px;
+  background: #dbf1ec; color: #174947; font: inherit; font-weight: 650;
+}
+.native-takeaways .native-review-download { display: block; width: 100%; margin-top: 10px; }
+.native-review-download:hover { background: #bce4da; }
+.native-review-download:focus-visible { outline: 3px solid #77b9d4; outline-offset: 2px; }

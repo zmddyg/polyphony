@@ -73,14 +73,19 @@ test('classroom analysis uses the configured gateway and keeps invalid citations
   const cookie = opened.headers.get('set-cookie').split(';', 1)[0];
   const { room } = await opened.json();
   const commands = '/api/rooms/' + room.code + '/commands';
-  const send = async type => {
-    const response = await post(commands, { role: 'teacher', type }, cookie);
+  const send = async (type, payload) => {
+    const response = await post(commands, { role: 'teacher', type, payload }, cookie);
     assert.equal(response.status, 200);
     return (await response.json()).room;
   };
   assert.equal((await send('reveal')).phase, 'reveal');
+  const fast = await send('analyze', { fastLocal: true });
+  assert.equal(fast.analysis.source, 'local');
+  assert.ok(Object.values(fast.analysis.optionExcerpts).some(quotes => quotes.length));
+  assert.equal(received.length, 0);
   const assisted = await send('analyze');
   assert.equal(assisted.analysis.source, 'provider');
+  assert.deepEqual(assisted.analysis.optionExcerpts, fast.analysis.optionExcerpts);
   assert.equal(assisted.decision, null);
   assert.equal(received[0].path, '/v1/chat/completions');
   assert.equal(received[0].outbound.response_format.json_schema.name, 'classroom_evidence');

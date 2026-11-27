@@ -1,6 +1,7 @@
 import { buildSciencePacket, formatScienceNumber, reviewRcSolution, scienceModels } from '../core/teaching-science.mjs';
 import { esc, icon } from '../ui.mjs';
-import { formatFormulaHtml as formulaHtml, formulaPlain } from '../core/formula-text.mjs';
+import { formulaPlain } from '../core/formula-text.mjs';
+import { renderRichMathHtml as formulaHtml } from '../core/math-render.mjs';
 
 const curveColors = ['#0B4F6C', '#047857', '#92400E'];
 const draftsByAnchor = new Map();
@@ -47,6 +48,15 @@ function chartScale(series, key, includeZero = false) {
   };
 }
 
+function chartLabelHtml(value) {
+  const text = String(value ?? '');
+  if (!text) return '';
+  if (!/\$|\\\(|\\\[/u.test(text) && /\\[A-Za-z]+/u.test(text) && !/\p{Script=Han}/u.test(text)) {
+    return formulaHtml(`$${text}$`);
+  }
+  return formulaHtml(text);
+}
+
 // Used by both the editing preview and projector. The coordinates are numeric
 // and there is no interaction, image request, or document access here.
 export function renderScienceChart(slide = {}) {
@@ -72,15 +82,15 @@ export function renderScienceChart(slide = {}) {
     return `<path class="psci-series" d="${path}" stroke="${color}" ${index % 2 ? 'stroke-dasharray="8 5"' : ''}/>`;
   }).join('');
   const legend = series.map(({ label, color }, index) => label
-    ? `<span><i ${index % 2 ? 'class="psci-dash"' : ''} style="border-color:${color}" aria-hidden="true"></i>${esc(label)}</span>`
+    ? `<span><i ${index % 2 ? 'class="psci-dash"' : ''} style="border-color:${color}" aria-hidden="true"></i><span>${chartLabelHtml(label)}</span></span>`
     : '').join('');
   const description = formulaPlain([slide.title, slide.yLabel, slide.xLabel, ...series.map(item => item.label)].filter(Boolean).join(' · '));
   return `<figure class="psci-chart">
-    <figcaption><span>${formulaHtml(slide.yLabel || '')}</span>${legend ? `<div class="psci-legend">${legend}</div>` : ''}</figcaption>
+    <figcaption><span>${chartLabelHtml(slide.yLabel || '')}</span>${legend ? `<div class="psci-legend">${legend}</div>` : ''}</figcaption>
     <svg viewBox="0 0 530 201" role="img" aria-label="${esc(description || '数值曲线')}">
       ${graph}<path class="psci-axis" d="M${left} ${top}V${bottom}H${right}"/>${plots}
     </svg>
-    ${slide.xLabel ? `<p class="psci-x-label">${formulaHtml(slide.xLabel)}</p>` : ''}
+    ${slide.xLabel ? `<p class="psci-x-label">${chartLabelHtml(slide.xLabel)}</p>` : ''}
   </figure>`;
 }
 
@@ -120,7 +130,7 @@ function oldSolutionMarkup(packet, previous) {
       `<li>${formulaHtml(label)}应为 ${formulaHtml(expected)}，旧解给出 ${formulaHtml(observed)}。</li>`).join('')}</ul>` : ''}
     <details>
       <summary>复核旧解的四项条件</summary>
-      <p class="psci-formula">${formulaHtml(previous.formula)}</p>
+      <p class="psci-formula">${formulaHtml(previous.formula, { block: true })}</p>
       ${reviewMarkup(checks)}
     </details>
   </aside>`;

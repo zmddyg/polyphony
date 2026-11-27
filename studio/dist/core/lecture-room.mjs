@@ -14,7 +14,9 @@ function position(score, index, total) {
   const entry = locateLectureFrame(score, index);
   if (!entry) reject('这个课件页不存在。');
   const page = score.pages[entry.pageIndex];
+  const supplement = page.adopted[entry.slideIndex];
   return { index, total, pageNumber: page.number, supplemental: entry.slideIndex >= 0,
+    speakerNotes: supplement?.speakerNotes ?? page.speakerNotes ?? '',
     hasInteraction: Boolean(page.interaction) };
 }
 
@@ -35,7 +37,7 @@ function activitySnapshot(state) {
 }
 
 export function commandNeedsScore(type) {
-  return type === 'lectureNavigate' || type === 'lectureInteract' || type === 'lectureExperimentStart';
+  return type === 'lectureNavigate' || type === 'lectureInteract' || type === 'lectureExperimentStart' || type === 'resetActivity';
 }
 
 export function applyRoomCommand(state, command, score) {
@@ -48,6 +50,32 @@ export function applyRoomCommand(state, command, score) {
   if (current.mode === 'ended') reject('这节讲义课已结束。');
   const event = (patch, label, detail) => recordRoomEvent({...state,...patch}, type, label, detail, payload.at);
   const nextLecture = patch => ({...current, turn:current.turn + 1, ...patch});
+  const quiet = patch => ({ ...state, ...patch, version: state.version + 1 });
+  if (type === 'setTimer') {
+    const durationSec = payload.durationSec ?? 0;
+    const endsAt = payload.at + durationSec * 1000;
+    if (!Number.isSafeInteger(durationSec) || durationSec < 0 || (durationSec && !Number.isSafeInteger(endsAt))) {
+      reject('请输入有效的限时秒数。');
+    }
+    return quiet({ timer: durationSec ? { endsAt, durationSec } : null });
+  }
+  if (type === 'slidePulse') {
+    if (current.mode !== 'slides') reject('请在讲授页提交存疑标记。');
+    const participantId = typeof payload.participantId === 'string' ? payload.participantId.trim() : '';
+    const { active = true } = payload;
+    if (!participantId || participantId.length > 100 || participantId.startsWith('demo-') || typeof active !== 'boolean') {
+      reject('存疑标记参数无效。');
+    }
+    const muddy = { ...current.muddy };
+    let marks = { ...muddy[current.pageNumber] };
+    if (Object.hasOwn(marks, participantId) === active) return state;
+    if (active && Object.keys(marks).length >= 500) reject('本页存疑标记已达上限。');
+    if (active) marks = { ...marks, [participantId]: true };
+    else delete marks[participantId];
+    if (Object.keys(marks).length) muddy[current.pageNumber] = marks;
+    else delete muddy[current.pageNumber];
+    return quiet({ lecture: { ...current, muddy } });
+  }
   if (type === 'lectureNavigate') {
     if (payload.index === current.index) return state;
     const next = position(score, payload.index, current.total);
@@ -70,6 +98,14 @@ export function applyRoomCommand(state, command, score) {
     } else active = initialLessonState(page.interaction);
     return event({...active,lecture:nextLecture({mode:'activity'}),lectureArchive},
       '原稿第 '+page.number+' 页开启互动', {pageNumber:page.number,lessonId:active.lessonId});
+  }
+  if (type === 'resetActivity') {
+    if (!current.hasInteraction || !['slides', 'activity'].includes(current.mode)) reject('本页没有可重置的互动。');
+    const page = score.pages[locateLectureFrame(score, current.index).pageIndex];
+    const participants = state.participants.filter(({ simulated }) => !simulated);
+    const lectureArchive = state.lectureArchive.filter(item => item.pageNumber !== current.pageNumber);
+    return event({ ...initialLessonState(page.interaction), participants, demo: false, lectureArchive,
+      lecture: nextLecture({ mode: 'activity' }) }, '已重置本页互动', { pageNumber: page.number });
   }
   if (type === 'lectureExperimentStart') {
     if (current.mode !== 'slides') reject('请先返回讲义。');

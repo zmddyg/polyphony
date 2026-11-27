@@ -366,6 +366,8 @@ export function renderDesk(root, ctx) {
     }
   }
 
+  previous?.click && root.removeEventListener('click', previous.click);
+  renderedDesks.get(root).click = click;
   root.addEventListener('click', click);
   return () => root.removeEventListener('click', click);
 }

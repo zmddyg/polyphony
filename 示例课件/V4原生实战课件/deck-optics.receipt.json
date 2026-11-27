@@ -7,7 +7,7 @@
       "title": "原稿结构解析与证据编号",
       "status": "complete",
       "pageCount": 10,
-      "blockCount": 153
+      "blockCount": 145
     },
     {
       "id": "triage",
@@ -22,15 +22,16 @@
         {
           "pageNumber": 5,
           "activityId": "param-explorer@1",
-          "quote": "把变量无量纲化"
+          "quote": "横坐标与两把标尺"
         },
         {
           "pageNumber": 8,
           "activityId": "concept-diagnosis@1",
-          "quote": "要解释的是机制，不只是记住结论"
+          "quote": "半个驱动周期后相移扰动翻转"
         }
       ],
-      "untouchedPages": 7
+      "untouchedPages": 7,
+      "selectionSource": "local"
     },
     {
       "id": "synthesize",
@@ -157,7 +158,7 @@
     }
   ],
   "mode": "auto",
-  "versionId": "sha256-6fe66a953278d1515c8d7bc25977a563f4c8ab96dbc0365e4bc09c85cfdba4e9",
-  "contentDigest": "sha256-6fe66a953278d1515c8d7bc25977a563f4c8ab96dbc0365e4bc09c85cfdba4e9",
+  "versionId": "sha256-0a3cec81a5bbd04dce7d031d07b85e9162f53a51cdfc094e057520fb704ed241",
+  "contentDigest": "sha256-0a3cec81a5bbd04dce7d031d07b85e9162f53a51cdfc094e057520fb704ed241",
   "source": "local"
 }

@@ -7,7 +7,7 @@
       "title": "原稿结构解析与证据编号",
       "status": "complete",
       "pageCount": 12,
-      "blockCount": 308
+      "blockCount": 313
     },
     {
       "id": "triage",
@@ -30,7 +30,8 @@
           "quote": "顺序明确，逐句执行"
         }
       ],
-      "untouchedPages": 9
+      "untouchedPages": 9,
+      "selectionSource": "local"
     },
     {
       "id": "synthesize",
@@ -165,7 +166,7 @@
     }
   ],
   "mode": "auto",
-  "versionId": "sha256-af3849f9a6a7228eaa5922437391d8b76168256542887acc74f8bda9be33678f",
-  "contentDigest": "sha256-af3849f9a6a7228eaa5922437391d8b76168256542887acc74f8bda9be33678f",
+  "versionId": "sha256-e766b625649ea9c4f4f1714e142096f98f044d50c8d417ab2de417ba40ce495b",
+  "contentDigest": "sha256-e766b625649ea9c4f4f1714e142096f98f044d50c8d417ab2de417ba40ce495b",
   "source": "local"
 }

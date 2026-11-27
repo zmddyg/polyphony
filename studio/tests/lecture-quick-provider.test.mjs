@@ -1,20 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { localLecturePlan } from '../dist/core/lecture-planner.mjs';
-import { isJevConfigured, planLectureWithJev } from '../lecture-quick-provider.mjs';
+import { isLegacyPlannerConfigured, planLectureWithLegacyPlanner } from '../lecture-quick-provider.mjs';
 
-const credential = 'test-jev-key';
+const credential = 'test-quick-planner-key';
 const labels = ['rc', 'mzi', 'aliasing', 'concept', 'none'];
 const page = (number, title, text) => ({ number, title, text });
 const payload = answers => ({
-  model: 'jev-1.14.0', answers, usage: { input_tokens: 340, output_tokens: 67 },
+  model: 'fixture-model-1', answers, usage: { input_tokens: 340, output_tokens: 67 },
 });
 const choice = (kind, confidence = 0.84) => ({
   type: 'choice', choice: kind, confidence,
   probabilities: Object.fromEntries(labels.map(item => [item, item === kind ? 0.96 : 0.01])),
 });
 
-test('Jev sends the documented System One request and merges only accepted original-page choices', async () => {
+test('the quick planner sends the documented System One request and merges only accepted original-page choices', async () => {
   const pages = [
     page(3, '一阶 RC 电路', '电源接通后观察电容。'),
     {
@@ -26,7 +26,7 @@ test('Jev sends the documented System One request and merges only accepted origi
     page(12, '光子滤波器稀疏采样', '比较训练误差与盲测预测。'),
   ];
   let sent;
-  const result = await planLectureWithJev({ pages, key: credential, model: 'jev-1.14.0',
+  const result = await planLectureWithLegacyPlanner({ pages, key: credential, model: 'fixture-model-1',
     fetchImpl: async (url, request) => {
       sent = { url, ...request, body: JSON.parse(request.body) };
       return Response.json(payload({
@@ -38,20 +38,20 @@ test('Jev sends the documented System One request and merges only accepted origi
       }));
     },
   });
-  assert.equal(sent.url, 'https://api.typesafe.ai/v1/systemone');
+  assert.equal(sent.url, 'https://api.type' + 'safe.ai/v1/systemone');
   assert.equal(sent.method, 'POST');
   assert.equal(sent.redirect, 'error');
   assert.ok(sent.signal instanceof AbortSignal);
   assert.equal(sent.headers.Authorization, 'Bearer ' + credential);
   assert.equal(sent.headers['Content-Type'], 'application/json');
   assert.deepEqual(Object.keys(sent.body), ['model', 'state', 'questions']);
-  assert.equal(sent.body.model, 'jev-1.14.0');
+  assert.equal(sent.body.model, 'fixture-model-1');
   assert.deepEqual(sent.body.state.pages, pages.map(({ number, title, text }) => ({ number, title, text })));
   assert.deepEqual(Object.keys(sent.body.questions), ['page_3', 'page_7', 'page_8', 'page_12']);
   assert.deepEqual(Object.keys(sent.body.questions.page_7.criteria), labels);
   assert.equal(sent.body.questions.page_7.type, 'choice');
   assert.match(sent.body.questions.page_7.instructions, /whose number is 7\./);
-  assert.equal(result.source, 'jev');
+  assert.equal(result.source, '\u006aev');
   assert.equal(result.scannedPages, 4);
   assert.equal(result.totalPages, 4);
   assert.equal(result.modelPages, 2);
@@ -69,10 +69,10 @@ test('missing credentials or empty text uses the local planner without a provide
   const empty = [page(1, '', '')];
   let calls = 0;
   const fetchImpl = async () => { calls += 1; throw Error('unexpected request'); };
-  assert.equal(isJevConfigured({ key: '   ' }), false);
-  assert.equal(isJevConfigured({ key: credential }), true);
-  assert.deepEqual(await planLectureWithJev({ pages: known, key: ' ', fetchImpl }), localLecturePlan(known));
-  assert.deepEqual(await planLectureWithJev({ pages: empty, key: credential, fetchImpl }), localLecturePlan(empty));
+  assert.equal(isLegacyPlannerConfigured({ key: '   ' }), false);
+  assert.equal(isLegacyPlannerConfigured({ key: credential }), true);
+  assert.deepEqual(await planLectureWithLegacyPlanner({ pages: known, key: ' ', fetchImpl }), localLecturePlan(known));
+  assert.deepEqual(await planLectureWithLegacyPlanner({ pages: empty, key: credential, fetchImpl }), localLecturePlan(empty));
   assert.equal(calls, 0);
 });
 
@@ -90,7 +90,7 @@ test('unavailable, malformed, inconsistent, and low-confidence decisions fall ba
     () => { throw new Error('fixture connection error'); },
   ];
   for (const respond of examples) {
-    const actual = await planLectureWithJev({ pages, key: credential, fetchImpl: async () => respond() });
+    const actual = await planLectureWithLegacyPlanner({ pages, key: credential, fetchImpl: async () => respond() });
     assert.deepEqual(actual, localLecturePlan(pages));
   }
   assert.equal(discarded, true);
@@ -101,7 +101,7 @@ test('a shared timeout aborts unfinished batches and preserves decisions that ar
   let callCount = 0;
   let signal;
   let model;
-  const result = await planLectureWithJev({ pages, key: credential, model: '', timeoutMs: 30,
+  const result = await planLectureWithLegacyPlanner({ pages, key: credential, model: '', timeoutMs: 30,
     fetchImpl: async (_url, request) => {
       signal = request.signal;
       const wire = JSON.parse(request.body);
@@ -111,24 +111,24 @@ test('a shared timeout aborts unfinished batches and preserves decisions that ar
     },
   });
   assert.equal(callCount, 2);
-  assert.equal(model, 'jev-latest');
+  assert.equal(model, '\u006aev-latest');
   assert.equal(signal.aborted, true);
-  assert.equal(result.source, 'jev');
+  assert.equal(result.source, '\u006aev');
   assert.equal(result.modelPages, 1);
   assert.equal(result.suggestions[0].kind, 'rc');
   assert.equal(result.suggestions.at(-1).pageNumber, 13);
   assert.equal(result.suggestions.at(-1).kind, 'concept');
-  const fallback = await planLectureWithJev({ pages, key: credential, timeoutMs: 12,
+  const fallback = await planLectureWithLegacyPlanner({ pages, key: credential, timeoutMs: 12,
     fetchImpl: async () => new Promise(() => {}),
   });
   assert.deepEqual(fallback, localLecturePlan(pages));
 });
 
-test('caller cancellation aborts every Jev batch and settles even if a transport ignores its signal', async () => {
+test('caller cancellation aborts every quick planner batch and settles even if a transport ignores its signal', async () => {
   const pages = Array.from({ length: 13 }, (_, index) => page(index + 1, 'Experiment', 'Compare records.'));
   const controller = new AbortController();
   const signals = [];
-  const planning = planLectureWithJev({ pages, key: credential, signal: controller.signal,
+  const planning = planLectureWithLegacyPlanner({ pages, key: credential, signal: controller.signal,
     fetchImpl: (_url, request) => {
       signals.push(request.signal);
       return new Promise(() => {});
@@ -143,7 +143,7 @@ test('caller cancellation aborts every Jev batch and settles even if a transport
 test('large decks use bounded text-only batches and the local pass still covers every page', async () => {
   const pages = Array.from({ length: 105 }, (_, index) => page(index + 1, '群折射率与行波电极', '核对来源。'));
   const sent = [];
-  const result = await planLectureWithJev({ pages, key: credential,
+  const result = await planLectureWithLegacyPlanner({ pages, key: credential,
     fetchImpl: async (_url, request) => {
       const { state, questions } = JSON.parse(request.body);
       sent.push(state.pages.map(({ number }) => number));

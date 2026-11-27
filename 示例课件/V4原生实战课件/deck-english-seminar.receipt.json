@@ -30,7 +30,8 @@
           "quote": "Evidence bank on the same slide"
         }
       ],
-      "untouchedPages": 7
+      "untouchedPages": 7,
+      "selectionSource": "local"
     },
     {
       "id": "synthesize",
@@ -157,7 +158,7 @@
     }
   ],
   "mode": "auto",
-  "versionId": "sha256-0e7b5543514dd26e24f1dea876629e05b3206f759e516779970167ddfa3393c3",
-  "contentDigest": "sha256-0e7b5543514dd26e24f1dea876629e05b3206f759e516779970167ddfa3393c3",
+  "versionId": "sha256-6f413add18b4989245a95cd7465c8328a5497dfc63140e75c2fadbb9b54aec4f",
+  "contentDigest": "sha256-6f413add18b4989245a95cd7465c8328a5497dfc63140e75c2fadbb9b54aec4f",
   "source": "local"
 }

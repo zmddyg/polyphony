@@ -41,7 +41,7 @@ export async function startLoopbackServer(context, listener) {
   }
 }
 
-export async function roomTestServer(context) {
+export async function roomTestServer(context, options) {
   const tempRoot = resolve(tmpdir());
   const prefix = 'polyphony-room-test-';
   const directory = await mkdtemp(join(tempRoot, prefix));
@@ -51,7 +51,11 @@ export async function roomTestServer(context) {
     await rm(directory, { recursive: true, force: true, maxRetries: 2 });
   });
   const snapshot = join(directory, 'rooms.json');
-  const isolatedKeys = ['POLYPHONY_AI_KEY', 'POLYPHONY_AI_BASE_URL', 'POLYPHONY_AI_MODEL', 'POLYPHONY_AI_OUTPUT_MODE', 'POLYPHONY_TEACHER_PASSPHRASE', 'POLYPHONY_STORAGE'];
+  const isolatedKeys = [
+    'POLYPHONY_AI_KEY', 'POLYPHONY_AI_BASE_URL', 'POLYPHONY_AI_MODEL', 'POLYPHONY_AI_OUTPUT_MODE',
+    'POLYPHONY_FAST_AI_KEY', 'POLYPHONY_FAST_AI_BASE_URL', 'POLYPHONY_FAST_AI_MODEL', 'POLYPHONY_FAST_AI_OUTPUT_MODE',
+    'POLYPHONY_TEACHER_PASSPHRASE', 'POLYPHONY_STORAGE',
+  ];
   const keys = [...isolatedKeys, 'POLYPHONY_ROOM_FILE'];
   const previous = new Map(keys.map(key => [key, process.env[key]]));
   let serve;
@@ -67,7 +71,7 @@ export async function roomTestServer(context) {
       else process.env[key] = value;
     }
   }
-  const origin = await startLoopbackServer(context, serve);
+  const origin = await startLoopbackServer(context, (req, res) => serve(req, res, options));
   return origin && { origin, snapshot };
 }
 

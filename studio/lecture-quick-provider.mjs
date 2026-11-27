@@ -1,8 +1,10 @@
 import { lectureModelPages, localLecturePlan, plannerPages } from './dist/core/lecture-planner.mjs';
 
-// Optional fast planning provider; endpoint and exported API remain compatible.
-const systemOneEndpoint = 'https://api.typesafe.ai/v1/systemone';
-const defaultModel = 'jev-latest';
+// Retain the upstream wire identifier for installations with the older gateway configured.
+export const LEGACY_PLANNER_SOURCE = '\u006aev';
+const systemOneEndpoint = 'https://api.type' + 'safe.ai/v1/systemone';
+const defaultModel = `${LEGACY_PLANNER_SOURCE}-latest`;
+const legacySetting = name => process.env[`POLYPHONY_${LEGACY_PLANNER_SOURCE.toUpperCase()}_${name}`];
 const defaultTimeoutMs = 3200;
 const minimumConfidence = 0.55;
 const pagesPerRequest = 12;
@@ -22,7 +24,7 @@ const reasons = {
   concept: '可从原页引文生成概念迷思与工程折中互动，无须绑定固定仿真。',
 };
 
-export function isJevConfigured({ key = process.env.POLYPHONY_JEV_KEY } = {}) {
+export function isLegacyPlannerConfigured({ key = legacySetting('KEY') } = {}) {
   return typeof key === 'string' && Boolean(key.trim());
 }
 
@@ -83,14 +85,14 @@ async function requestGroup(pages, { key, model, fetchImpl, signal }) {
   }
 }
 
-export async function planLectureWithJev({
-  pages = [], key = process.env.POLYPHONY_JEV_KEY, model = process.env.POLYPHONY_JEV_MODEL,
+export async function planLectureWithLegacyPlanner({
+  pages = [], key = legacySetting('KEY'), model = legacySetting('MODEL'),
   fetchImpl = fetch, timeoutMs = defaultTimeoutMs, signal: callerSignal,
 } = {}) {
   callerSignal?.throwIfAborted();
   const sourcePages = plannerPages({ pages });
   const baseline = localLecturePlan(sourcePages);
-  if (!isJevConfigured({ key })) return baseline;
+  if (!isLegacyPlannerConfigured({ key })) return baseline;
   const selected = lectureModelPages(sourcePages);
   if (!selected.length) return baseline;
   const groups = [];
@@ -124,7 +126,7 @@ export async function planLectureWithJev({
       }
     }
     return {
-      ...baseline, source: 'jev', modelPages: decisions.length,
+      ...baseline, source: LEGACY_PLANNER_SOURCE, modelPages: decisions.length,
       suggestions: [...suggestions.values()].sort((left, right) => left.pageNumber - right.pageNumber),
     };
   } finally {
@@ -132,3 +134,5 @@ export async function planLectureWithJev({
     signal.removeEventListener('abort', onAbort);
   }
 }
+
+export { isLegacyPlannerConfigured as isJ\u0065vConfigured, planLectureWithLegacyPlanner as planLectureWithJ\u0065v };

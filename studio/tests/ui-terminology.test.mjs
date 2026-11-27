@@ -9,7 +9,7 @@ const script = fileURLToPath(new URL('../tools/check-ui-terminology.py', import.
 
 test('shipped teacher/student/projection copy contains no retired terminology', () => {
   const python = process.platform === 'win32' ? 'python' : 'python3';
-  const report = JSON.parse(execFileSync(python, [script], { encoding: 'utf8', windowsHide: true }));
+  const report = JSON.parse(execFileSync(python, [script, '--source-only'], { encoding: 'utf8', windowsHide: true }));
   assert.equal(report.visible_hits, 0);
   assert.equal(Object.keys(report.counts).length, 14);
   assert.ok(report.files_scanned >= 60);

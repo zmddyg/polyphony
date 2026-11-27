@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "description": "共演智课 · 通用课件 Agent Harness 与模块化交互教学平台",
-  "engines": { "node": ">=22" },
-  "scripts": { "start": "node server.mjs", "test": "node --test" }
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test tests/*.test.mjs"
+  }
 }

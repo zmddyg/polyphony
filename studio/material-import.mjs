@@ -11,6 +11,7 @@ export const MAX_MATERIAL_BYTES = 32 * 1024 * 1024;
 export const MAX_MATERIAL_PAGES = 100;
 const MAX_PAGE_TEXT = 12_000;
 const MAX_PREVIEW_BYTES = 12 * 1024 * 1024;
+const MAX_SOURCE_IMAGE_BYTES = 6 * 1024 * 1024;
 const MAX_RENDERED_PDF_BYTES = 64 * 1024 * 1024;
 const TEMP_PREFIX = 'polyphony-material-';
 const pdfScript = fileURLToPath(new URL('./tools/material-import-pdf.py', import.meta.url));
@@ -64,7 +65,8 @@ function pageLimitError() {
 
 async function readPdf(inputPath, directory, programs = pythonCandidates(process.env.POLYPHONY_PDF_PYTHON)) {
   const unreadable = () => failure(422, '无法读取这份 PDF。请确认文件完整，或重新导出后再导入。');
-  const args = ['-I', pdfScript, inputPath, String(MAX_MATERIAL_PAGES), String(MAX_PAGE_TEXT), String(MAX_PREVIEW_BYTES)];
+  const args = ['-I', pdfScript, inputPath, String(MAX_MATERIAL_PAGES), String(MAX_PAGE_TEXT),
+    String(MAX_PREVIEW_BYTES), String(MAX_SOURCE_IMAGE_BYTES)];
   for (const program of programs) {
     let output;
     try {
@@ -73,7 +75,7 @@ async function readPdf(inputPath, directory, programs = pythonCandidates(process
         env: subprocessEnvironment(directory),
         windowsHide: true,
         timeout: 25_000,
-        maxBuffer: Math.ceil(MAX_PREVIEW_BYTES * 4 / 3) + 8 * 1024 * 1024,
+        maxBuffer: Math.ceil((MAX_PREVIEW_BYTES + MAX_SOURCE_IMAGE_BYTES) * 4 / 3) + 8 * 1024 * 1024,
       });
       output = JSON.parse(stdout);
     } catch (error) {

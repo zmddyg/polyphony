@@ -256,8 +256,9 @@
 
 @media (max-width: 580px) {
   .shell-workspace { --shell-inset: 13px; }
-  .shell-header-inner { gap: 6px; }
+  .shell-header-inner { flex-wrap: wrap; gap: 6px; padding-block: 5px; }
   .shell-header-left, .shell-header-actions { gap: 5px; }
+  .shell-header-actions { max-width: 100%; flex-wrap: wrap; }
   .shell-surface-link, .shell-drawer-open { width: 39px; min-height: 40px; padding-inline: 0; }
   .shell-surface-link > span, .shell-room-button > span { display: none; }
   .shell-room-button { min-height: 38px; gap: 4px; padding-inline: 7px; }

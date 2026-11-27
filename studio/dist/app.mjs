@@ -6,14 +6,15 @@ import { icon, esc, viewStyles } from './ui.mjs';
 const app = document.querySelector('#app');
 const overlays = document.querySelector('#overlays');
 const liveMessage = document.querySelector('#toast');
-const titles = {materials:'备课',desk:'课堂',workshop:'独立互动',replay:'课后复盘',student:'学生端',stage:'投影',remote:'手机遥控'};
-const teacherViews = ['materials','desk','workshop','replay'];
-let demonstration = null;
+const titles = {materials:'课件活化',desk:'智慧讲台',lab:'交互模组库',system:'Harness 架构与接口协议',workshop:'独立互动',replay:'学情复盘',student:'学生端',stage:'投影',remote:'手机遥控'};
+const teacherViews = ['materials','desk','lab','workshop','replay','system'];
+let teacherExtension = null;
 let view = 'materials';
 let labTab = null;
 
 let session, unsubscribe, offStatus, cleanup, toastTimer, restoreFocus;
-let pendingPage, lectureKeyboard, qrScript;
+let pendingPage, lectureKeyboard, qrScript, mountedPage;
+let initialSplitRoom = null;
 let generation = 0;
 let publishingLesson = false;
 let railOpen = false;
@@ -43,7 +44,7 @@ function localize(error) {
   return detail;
 }
 
-const recentKey = () => demonstration ? 'polyphony.demo.recent.v1' : 'polyphony.recent.v1';
+const recentKey = () => teacherExtension ? 'polyphony.demo.recent.v1' : 'polyphony.recent.v1';
 function recentRooms() {
   const rooms = readStorage(recentKey(), []);
   return Array.isArray(rooms) ? rooms.filter(room => room?.code && room.title) : [];
@@ -252,6 +253,13 @@ function invite() {
 
 async function remotePair() {
   const active = session;
+  if (active?.mode === 'local') {
+    const split = app.querySelector('[data-inline-action=split]');
+    if (!split) return toast('请在课件讲台打开同屏演示。');
+    if (split.getAttribute('aria-pressed') !== 'true') split.click();
+    app.querySelector('[data-companion-view=remote]')?.click();
+    return;
+  }
   if (!active?.createRemotePair) return;
   const dialog = modal('手机遥控配对', `<p class="dialog-intro">用教师自己的手机扫码。配对链接五分钟内有效，只能使用一次。</p>
     <div id="room-qr" class="room-qr" role="img" aria-label="教师手机遥控二维码" hidden></div>
@@ -326,6 +334,10 @@ function navLink(name, glyph) {
 }
 
 function paintShellStatus() {
+  const capsule = app.querySelector('[data-api-status]');
+  const summary = session.providerSummary;
+  if (capsule) capsule.textContent = summary?.configured ? summary.model ?? '主模型已配置' :
+    summary?.fastConfigured ? '快速决策模型已配置' : '未配密钥 · 本地编排就绪';
   const status = app.querySelector('[data-shell-status]');
   if (!status) return;
   const local = session.mode === 'local';
@@ -351,12 +363,9 @@ function paintShell() {
       <div class="shell-brand-row"><a class="shell-brand" href="?view=materials&amp;room=${esc(session.code)}" data-nav="materials" aria-label="共演智课 · 备课">${brand}</a>
         <button type="button" class="shell-drawer-close" data-rail-close aria-label="收起导航">${icon('close',20)}</button></div>
       <nav class="shell-nav" aria-label="教师工作区"><div class="shell-nav-group">
-        ${demonstration ? navLink('demo','play') + navLink('lab','lab') : ''}
-        ${navLink('materials','book')}
-        ${classroomStarted && view !== 'replay' ? navLink('desk','desk') : ''}
-        ${view === 'replay' ? navLink('replay','replay') : ''}
+        ${navLink('materials','book')}${navLink('desk','desk')}${navLink('lab','lab')}${navLink('replay','replay')}
       </div></nav>
-      ${classroomStarted ? '<div class="shell-rail-footer"><div class="shell-connection" data-shell-status role="status"><i aria-hidden="true"></i><span data-mode></span></div></div>' : ''}
+      <div class="shell-rail-footer"><div class="shell-secondary-nav">${navLink('system','network')}</div><div class="shell-connection" data-shell-status role="status"><i aria-hidden="true"></i><span data-mode></span></div></div>
     </aside>
     <button type="button" class="shell-scrim" data-rail-close tabindex="-1" aria-label="收起导航"></button>
     <div class="shell-main"><header class="shell-header"><div class="shell-header-inner">
@@ -365,10 +374,10 @@ function paintShell() {
         <strong class="shell-current">${titles[view]}</strong>
       </div>
       <div class="shell-header-actions">
-        ${recentRooms().length ? '<button type="button" class="shell-room-button" data-rooms aria-haspopup="dialog">课堂记录</button>' : ''}
-        ${view === 'desk' && classroomStarted && !session.state.lecture && session.mode === 'server'
-          ? '<button type="button" class="shell-room-button" data-remote-pair aria-haspopup="dialog">手机遥控</button>' : ''}
-        <button type="button" class="shell-room-button" data-api-hub aria-haspopup="dialog">设置</button>
+        <button type="button" class="v3-api-button" data-api-hub aria-haspopup="dialog">🔌 模型 API <small data-api-status></small></button>
+        ${classroomStarted ? '<button type="button" class="shell-room-button" data-projector>投影大屏</button><button type="button" class="shell-room-button" data-student>学生端</button><button type="button" class="shell-room-button" data-remote-pair>手机遥控</button>' : ''}
+        <button type="button" class="shell-room-button" data-invite>课堂码</button>
+        <button type="button" class="shell-room-button" data-rooms aria-haspopup="dialog">课堂记录</button>
       </div>
     </div></header><main id="surface" class="content shell-content" tabindex="-1"></main></div></div>`;
 
@@ -380,8 +389,15 @@ function paintShell() {
   app.querySelector('[data-rail-open]').onclick = () => setRail(true);
   for (const button of app.querySelectorAll('[data-rail-close]')) button.onclick = () => setRail(false);
   app.querySelector('[data-rooms]')?.addEventListener('click', roomChooser);
-  app.querySelector('[data-api-hub]').onclick = () => modelApiDialog(() => { if (view === 'materials') paintPage(); });
+  app.querySelector('[data-api-hub]').onclick = () => modelApiDialog(() => {
+    paintShellStatus();
+    if (view === 'desk' && session.state.lecture) paintPage();
+  });
+  app.querySelector('[data-projector]')?.addEventListener('click',()=>openSurface('stage'));
+  app.querySelector('[data-student]')?.addEventListener('click',()=>openSurface('student'));
+  app.querySelector('[data-invite]')?.addEventListener('click',invite);
   app.querySelector('[data-remote-pair]')?.addEventListener('click', remotePair);
+  teacherExtension?.mountHeader?.(app.querySelector('.shell-header-actions'), context, openMaterialFile);
   paintShellStatus();
   setRail(false, false);
 }
@@ -444,7 +460,7 @@ async function startLesson(lesson) {
   }
 }
 
-async function startLecture(lecture, { experiment = false } = {}) {
+async function startLecture(lecture, { experiment = false, initialSplit = false, prepare } = {}) {
   if (publishingLesson) throw new Error('正在创建课堂，请稍候。');
   publishingLesson=true;
   const active=session;
@@ -456,24 +472,44 @@ async function startLecture(lecture, { experiment = false } = {}) {
       await next.command('lectureExperimentAct',{action:'fit',target:next.state.experiment.target,
         expectedLectureIndex:next.state.lecture.index,expectedLectureTurn:next.state.lecture.turn});
     }
+    if (prepare) await prepare((type, payload) => context(next, 'desk').command(type, payload));
     if (session!==active) throw new Error('备课房间已切换，请重新打开讲义。');
-    activate(next,'desk');focusSurface();
+    initialSplitRoom = initialSplit ? next.code : null;
+    activate(next, next.state.lecture.mode === 'ended' ? 'replay' : 'desk');focusSurface();
     return {code:next.code};
   } catch(error) {next?.close();throw error;}
   finally {publishingLesson=false;}
 }
 
-function context() {
-  const active=session, snapshot=active.state;
-  return {state:snapshot,mode:active.mode,connected:active.connected,remote:view==='remote',participantId:active.participantId,tab:labTab,esc,icon,toast,go,invite,open:openSurface,url:v=>active.url(v),
-    demonstration: Boolean(demonstration), configureModel: modelApiDialog,
-    remotePair: active.mode === 'server' && view === 'desk' ? remotePair : null,
+function context(active = session, surface = view) {
+  const snapshot = active.state;
+  return {state:snapshot,mode:active.mode,connected:active.connected,remote:surface==='remote',participantId:active.participantId,tab:labTab,esc,icon,toast,copy,go,invite,open:openSurface,url:v=>active.url(v),
+    demonstration: Boolean(teacherExtension) && surface !== 'materials', configureModel: modelApiDialog,
+    initialSplit: surface === 'desk' && active.code === initialSplitRoom,
+    remotePair: active.mode === 'server' ? remotePair : null,
+    openCompanion: surface === 'desk' && snapshot.lecture ? async seat => {
+      const remote = seat === 'remote';
+      const companion = await openSession({role:remote ? 'teacher' : 'student', room:active.code, seat:remote ? undefined : seat});
+      return {
+        context: () => context(companion, remote ? 'remote' : 'student'),
+        subscribe: companion.subscribe,
+        subscribeStatus: companion.subscribeStatus,
+        close: () => companion.close(),
+      };
+    } : null,
+    regeneratePage:payload=>active.regeneratePage(payload),
+    reviseSlide:(payload,options)=>active.reviseSlide(payload,options),
     askPeer:snapshot.lecture ? ()=>active.askPeer(snapshot.lecture.index,snapshot.lecture.turn) : null,
     startLecture,startLesson,getState:()=>active.state,getRoomState:()=>active.state,getFrame:index=>active.getFrame(index),
     get providerSummary(){return active.providerSummary;},runHarness:(material,options)=>active.runHarness(material,options),authorDeck:(spec,options)=>active.authorDeck(spec,options),
+    adaptMaterial:(material,options)=>active.adaptMaterial(material, teacherExtension?.adaptOptions?.(material,options) ?? options),
+    searchMedia:(input,options)=>active.searchMedia(input,options),
+    quickTriage:(options)=>active.quickTriage(snapshot.lecture.index,snapshot.lecture.turn,options),
     materialRendering:!!active.materialRendering,
     importMaterial:file=>withTeacherPassphrase(passphrase => active.importMaterial(file,passphrase)),planLecture:material=>active.planLecture(material),
-    modelAvailable:!!active.assistedComposition,aiOutputMode:active.aiOutputMode,compose:input=>active.compose(input),
+    modelAvailable:active.mode === 'server' && Boolean(active.providerSummary?.configured ?? active.assistedComposition),
+    analysisAvailable:active.mode === 'server' && Boolean(active.providerSummary?.configured || active.providerSummary?.fastConfigured),
+    aiOutputMode:active.aiOutputMode,compose:input=>active.compose(input),
     command:async(type,payload={})=>{const result = await active.command(type,{...payload,expectedRound:snapshot.round,expectedLessonId:snapshot.lessonId,
       ...(snapshot.lecture&&{expectedLectureIndex:snapshot.lecture.index,expectedLectureTurn:snapshot.lecture.turn})});
       if (active === session && roleFor(view) === 'teacher') {
@@ -487,32 +523,100 @@ function context() {
 
 
 function modelApiDialog(onUpdate) {
-  const summary=session.providerSummary??{};
-  const dialog=modal('模型设置',`<p class="dialog-intro">OpenAI 兼容 Chat Completions 协议，可连接 DeepSeek、Qwen、Gemini 或校园网关。</p><form class="v3-provider-form"><label>预设端点<select name="preset"><option value="custom">自定义 / 校园网关</option><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="qwen">Qwen</option><option value="gemini">Gemini（兼容协议）</option></select></label><label>Base URL<input type="url" name="baseUrl" required placeholder="https://gateway.example.edu/v1" autocomplete="off"></label><label>Model<input name="model" required value="${esc(summary.model??'')}" placeholder="模型名称" autocomplete="off"></label><label>API Key<input type="password" name="key" required autocomplete="new-password" placeholder="输入密钥（不回显已保存密钥）"></label><label>输出模式<select name="outputMode"><option value="json_object">JSON Object（通用兼容）</option><option value="json_schema">JSON Schema（严格结构）</option><option value="text">Text JSON（兼容网关）</option></select></label><p class="v3-secret-note">${session.mode==='local'?'仅保存在当前浏览器标签页会话内存，关闭即销毁，绝不写入导出课件':'仅保存在本机服务运行内存，停止服务即销毁，绝不写入课堂存档或导出课件'}。</p><div class="v3-dialog-actions"><button class="v3-subtle" type="button" data-provider-clear>清除配置</button><button class="v3-subtle" type="button" data-provider-test>测试连接</button><button class="v3-primary" type="submit">保存至当前会话</button></div><p role="status" data-provider-feedback></p></form>`);
-  const form=dialog.querySelector('form'),feedback=form.querySelector('[data-provider-feedback]');
-  const presets={openai:['https://api.openai.com/v1','gpt-4.1-mini'],deepseek:['https://api.deepseek.com','deepseek-chat'],qwen:['https://dashscope.aliyuncs.com/compatible-mode/v1','qwen-plus'],gemini:['https://generativelanguage.googleapis.com/v1beta/openai','gemini-2.5-flash']};
-  form.elements.preset.onchange=()=>{const p=presets[form.elements.preset.value];if(p){form.elements.baseUrl.value=p[0];form.elements.model.value=p[1];}};
-  const perform=async(test=false,clear=false)=>{
-    if(!clear&&!form.reportValidity())return;
-    const input=clear?{clear:true}:Object.fromEntries(new FormData(form));
-    if(test)Object.assign(input,{test:true,testOnly:true});
-    for(const b of form.querySelectorAll('button'))b.disabled=true;
-    feedback.textContent=test?'正在测试连接（最多 5 秒）…':'正在保存当前会话…';
-    try { await session.configureProvider(input); feedback.textContent=clear?'配置已清除。':test?'连接测试通过。':'已保存；密钥不会写入课件。';if (!test) onUpdate?.(); }
-    catch(error){feedback.textContent=localize(error);}
-    finally{for(const b of form.querySelectorAll('button'))b.disabled=false;}
+  const active = session;
+  const summary = active.providerSummary ?? {};
+  const outputOptions = '<option value="json_object">JSON Object（通用兼容）</option><option value="json_schema">JSON Schema（严格结构）</option><option value="text">Text JSON（兼容网关）</option>';
+  const dialog = modal('模型设置', `<p class="dialog-intro">通过兼容 Chat Completions 的网关连接模型。</p>
+    <form class="v3-provider-form" autocomplete="off">
+      <label>预设端点<select name="preset"><option value="custom">自定义 / 校园网关</option><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="qwen">Qwen</option><option value="gemini">Gemini（兼容协议）</option></select></label>
+      <label>Base URL<input type="url" name="baseUrl" maxlength="8000" placeholder="https://gateway.example.edu/v1"></label>
+      <label>Model<input name="model" maxlength="8000" value="${esc(summary.model ?? '')}" placeholder="主生成模型"></label>
+      <label>API Key<input type="password" name="key" maxlength="8000" autocomplete="new-password" placeholder="${summary.configured ? '留空使用当前会话的主密钥' : '主模型密钥'}"></label>
+      <label>输出模式<select name="outputMode">${outputOptions}</select></label>
+      <fieldset class="fast-provider-settings">
+        <legend>⚡ 快速决策模型</legend>
+        <div class="fast-provider-grid">
+          <label>快速模型名<input name="fastModel" maxlength="8000" placeholder="填写模型名启用"></label>
+          <label>快速模型地址<input type="url" name="fastBaseUrl" maxlength="8000" placeholder="留空沿用当前地址或主模型地址"></label>
+          <label>快速模型密钥<input type="password" name="fastKey" maxlength="8000" autocomplete="new-password" placeholder="同源可留空，独立网关请填写"></label>
+          <label>快速模型输出模式<select name="fastOutputMode"><option value="">沿用当前设置</option><option value="inherit">继承主模型</option>${outputOptions}</select></label>
+        </div>
+        <div class="fast-provider-actions"><span data-fast-provider-status></span>
+          <button class="v3-subtle" type="button" data-provider-fast-test>测试快速模型连通性</button>
+          <button class="v3-subtle" type="button" data-provider-fast-disable>关闭快速模型</button>
+        </div>
+      </fieldset>
+      <p class="v3-secret-note">主模型和快速模型的密钥仅在当前${active.mode === 'local' ? '页面' : '服务进程'}的内存中使用。</p>
+      <div class="v3-dialog-actions"><button class="v3-subtle" type="button" data-provider-clear>清除配置</button><button class="v3-subtle" type="button" data-provider-test>测试连接</button><button class="v3-primary" type="submit">保存至当前会话</button></div>
+      <p role="status" data-provider-feedback></p>
+    </form>`);
+  const form = dialog.querySelector('form');
+  const feedback = form.querySelector('[data-provider-feedback]');
+  const disableFast = form.querySelector('[data-provider-fast-disable]');
+  const renderStatus = provider => {
+    form.querySelector('[data-fast-provider-status]').textContent = provider?.fastConfigured ? '已配置' : '未配置';
+    disableFast.hidden = !provider?.fastConfigured;
   };
-  form.onsubmit=event=>{event.preventDefault();void perform();};
-  form.querySelector('[data-provider-test]').onclick=()=>perform(true);
-  form.querySelector('[data-provider-clear]').onclick=()=>perform(false,true);
+  renderStatus(summary);
+  form.elements.outputMode.value = summary.outputMode ?? 'json_object';
+  const presets = { openai: ['https://api.openai.com/v1', 'gpt-4.1-mini'], deepseek: ['https://api.deepseek.com/v1', 'deepseek-v4-pro'], qwen: ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen-plus'], gemini: ['https://generativelanguage.googleapis.com/v1beta/openai', 'gemini-2.5-flash'] };
+  form.elements.preset.onchange = () => {
+    const preset = presets[form.elements.preset.value];
+    if (preset) [form.elements.baseUrl.value, form.elements.model.value] = preset;
+  };
+  const settings = () => {
+    const data = Object.fromEntries(new FormData(form));
+    const input = { outputMode: data.outputMode };
+    for (const name of ['baseUrl', 'model', 'key', 'fastModel', 'fastBaseUrl', 'fastKey']) {
+      if (data[name].trim()) input[name] = data[name];
+    }
+    if (data.fastOutputMode) input.fastOutputMode = data.fastOutputMode === 'inherit' ? '' : data.fastOutputMode;
+    return input;
+  };
+  const perform = async action => {
+    if (!['clear', 'disableFast'].includes(action) && !form.reportValidity()) return;
+    const test = action === 'main' || action === 'fast';
+    const input = action === 'clear' ? { clear: true } : action === 'disableFast' ? { fastModel: '' } : settings();
+    if (test) Object.assign(input, { test: true, testOnly: true, testTier: action });
+    dialog.setAttribute('aria-busy', 'true');
+    for (const button of form.querySelectorAll('button')) button.disabled = true;
+    feedback.textContent = test ? '正在测试连接（最多 12 秒）…' : '正在保存当前会话…';
+    try {
+      const result = await active.configureProvider(input);
+      feedback.textContent = action === 'clear' ? '已恢复默认配置。' : action === 'disableFast' ? '已关闭快速模型。' :
+        test ? `${action === 'fast' ? '快速模型' : '主模型'}连接测试通过。` : '已保存当前会话。';
+      if (!test) {
+        form.elements.key.value = form.elements.fastKey.value = '';
+        form.elements.fastModel.value = form.elements.fastBaseUrl.value = form.elements.fastOutputMode.value = '';
+        if (action === 'clear') {
+          form.elements.baseUrl.value = '';
+          form.elements.model.value = result.providerSummary?.model ?? '';
+          form.elements.outputMode.value = result.providerSummary?.outputMode ?? 'json_object';
+        }
+        renderStatus(result.providerSummary);
+        if (session === active) { paintShellStatus(); onUpdate?.(); }
+      }
+    } catch (error) { feedback.textContent = localize(error); }
+    finally {
+      dialog.removeAttribute('aria-busy');
+      for (const button of form.querySelectorAll('button')) button.disabled = false;
+    }
+  };
+  form.onsubmit = event => { event.preventDefault(); void perform('save'); };
+  form.querySelector('[data-provider-test]').onclick = () => perform('main');
+  form.querySelector('[data-provider-fast-test]').onclick = () => perform('fast');
+  form.querySelector('[data-provider-clear]').onclick = () => perform('clear');
+  disableFast.onclick = () => perform('disableFast');
 }
 
 
 const pages = {
   materials: {
-    styles: ['lecture-stage', 'material-science'],
+    styles: ['lecture-stage', 'material-science', 'material-workspace'],
     load: () => import('./views/material-workspace.mjs').then(module => module.renderMaterialWorkspace),
   },
+  lab: { styles:['lab','challenge-lab','cognition'], load:()=>import('./views/lab.mjs').then(module=>module.renderLab) },
+  system: { styles:['lab'], load:()=>import('./views/system.mjs').then(module=>module.renderSystem) },
   desk: { styles: ['desk'], load: () => import('./views/desk.mjs').then(module => module.renderDesk) },
   student: { styles: ['student'], load: () => import('./views/student.mjs').then(module => module.renderStudent) },
   stage: { styles: ['cognition','surfaces'], load: () => import('./views/surfaces.mjs').then(module => module.renderStage) },
@@ -563,9 +667,24 @@ function preparePage(page) {
   });
 }
 
+async function openMaterialFile(file) {
+  if (view !== 'materials') go('materials');
+  const root = app.querySelector('#surface');
+  await preparePage(pages.materials);
+  if (view !== 'materials' || !root?.isConnected) throw new Error('备课工作区已切换，请重新载入。');
+  const field = root.querySelector('[data-file]');
+  if (!field || root.querySelector('[data-cancel-authoring], [data-upload]:disabled, [data-source-mode]:disabled')) {
+    throw new Error('当前备课任务尚未完成，请稍后载入。');
+  }
+  const selection = new DataTransfer();
+  selection.items.add(file);
+  field.files = selection.files;
+  field.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
 function clearPage() {
   if (typeof cleanup==='function') cleanup();
-  cleanup = pendingPage = undefined;
+  cleanup = pendingPage = mountedPage = undefined;
 }
 
 function paintPage() {
@@ -576,8 +695,13 @@ function paintPage() {
   if (page.render) {
     const keepFocus = (view === 'stage' || view === 'system') && root.contains(document.activeElement);
     const control = keepFocus ? focusSelector(document.activeElement) : null;
-    clearPage();
-    cleanup = page.render(root, context(), roleFor(view));
+    const same = mountedPage?.root === root && mountedPage.view === view && mountedPage.render === page.render;
+    if (!same) clearPage();
+    if (!same || !['materials','lab','workshop','system'].includes(view)) {
+      cleanup = page.render(root, context(), roleFor(view));
+      if (view === 'desk' && session.code === initialSplitRoom) initialSplitRoom = null;
+      mountedPage = {root,view,render:page.render};
+    }
     if (control) root.querySelector(control)?.focus({preventScroll:true});
     return;
   }
@@ -718,7 +842,7 @@ window.addEventListener('popstate',()=>{
 });
 mobileShell.addEventListener('change', () => setRail(false));
 window.addEventListener('keydown', event => {
-  if (!railOpen && session?.state.lecture && view==='desk') lectureKeyboard?.(event,context());
+  if (!railOpen && session?.state.lecture && view==='desk') lectureKeyboard?.(event,context(),app.querySelector('#surface'));
   if (!railOpen) return;
   if (event.key === 'Escape') {
     event.preventDefault();
@@ -736,23 +860,20 @@ window.addEventListener('keydown', event => {
     first?.focus();
   }
 });
-window.addEventListener('pagehide',e=>{if(!e.persisted)session?.close();});
+window.addEventListener('pagehide', event => {
+  if (event.persisted) return;
+  clearPage();
+  session?.close();
+});
 function requestedView(params) {
   const requested = params.get('view');
   if ((requested === 'desk' || requested === 'replay') && !params.has('room')) return 'materials';
   if (Object.hasOwn(titles, requested)) return requested;
-  if (demonstration && requested === 'system') return 'lab';
-  return demonstration ? 'demo' : params.has('room') && !requested ? 'desk' : 'materials';
+  return params.has('room') && !requested ? 'desk' : 'materials';
 }
 
-export function startApplication(extras = null) {
-  demonstration = extras;
-  if (extras) {
-    Object.assign(titles, { demo:'比赛演示', lab:'交互模组' });
-    teacherViews.push('demo','lab');
-    pages.demo = { render:extras.renderMenu };
-    pages.lab = { styles:['lab','challenge-lab','cognition'], load:extras.loadGallery };
-  }
+export function startApplication({ extension = null } = {}) {
+  teacherExtension = extension;
   const query = new URL(location.href).searchParams;
   view = requestedView(query);
   labTab = query.get('tab');

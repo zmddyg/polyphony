@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1300" viewBox="0 0 1600 1300" role="img">
+<title>共演智课 · Polyphony V4.0 系统架构</title>
+<rect width="1600" height="1300" rx="18" fill="#F3F7FA"/>
+<g font-family="Microsoft YaHei,Arial,sans-serif">
+<text x="48" y="54" font-size="26" fill="#0A7D86" font-weight="700">共演智课 · Polyphony V4.0</text>
+<text x="48" y="106" font-size="37" fill="#1D3B54" font-weight="700">双源备课、工具调用与同页课堂</text>
+<rect x="48" y="145" width="1504" height="202" rx="13" fill="#FFFFFF" stroke="#CBDAE5"/>
+<text x="74" y="185" font-size="26" fill="#087E87" font-weight="700">01  双源备课接入</text>
+<rect x="74" y="207" width="710" height="115" rx="13" fill="#EAF4F5" stroke="#CBDAE5"/>
+<rect x="805" y="207" width="720" height="115" rx="13" fill="#EDF1FC" stroke="#CBDAE5"/>
+<text x="94" y="245" font-size="25" fill="#1D3B54" font-weight="700">旧 PPT 与教材</text>
+<text x="94" y="285" font-size="22" fill="#1D3B54" font-weight="400">原页活化、插入拓展页或重构并回用原稿插图</text>
+<text x="825" y="245" font-size="25" fill="#1D3B54" font-weight="700">从教学目标生成原生课件</text>
+<text x="825" y="285" font-size="22" fill="#1D3B54" font-weight="400">6–48 页统一规划，默认 10 页也由 Agent 编排</text>
+<rect x="48" y="367" width="1504" height="433" rx="13" fill="#EAF4F5" stroke="#CBDAE5"/>
+<text x="74" y="409" font-size="27" fill="#087E87" font-weight="700">02  教学编排 Agent 与五阶段 Harness</text>
+<rect x="74" y="428" width="1452" height="52" rx="13" fill="#15354F" stroke="#CBDAE5"/>
+<text x="95" y="463" font-size="23" fill="#FFFFFF" font-weight="700">开放兼容主模型 + 快速决策模型  /  原生工具调用与 JSON Action</text>
+<text x="96" y="521" font-size="23" fill="#1D3B54" font-weight="700">01 解析与课程规划</text>
+<text x="366" y="521" font-size="22" fill="#1D3B54" font-weight="400">保留原稿 M1..Mk，或规划新课的章节、符号约定和逐页任务。</text>
+<text x="96" y="565" font-size="23" fill="#1D3B54" font-weight="700">02 节奏与卡点预算</text>
+<text x="366" y="565" font-size="22" fill="#1D3B54" font-weight="400">依据教师节奏和互动密度，在关键理解转折安排检测。</text>
+<text x="96" y="609" font-size="23" fill="#1D3B54" font-weight="700">03 页块与契约合成</text>
+<text x="366" y="609" font-size="22" fill="#1D3B54" font-weight="400">按章串行调用工具，提交讲义页，再按实际页面内容生成互动。</text>
+<text x="96" y="653" font-size="23" fill="#1D3B54" font-weight="700">04 核验与限次返修</text>
+<text x="366" y="653" font-size="22" fill="#1D3B54" font-weight="400">核对引文、KaTeX、页面密度与图形。全卷审查对重点页面定点修订。</text>
+<text x="96" y="697" font-size="23" fill="#1D3B54" font-weight="700">05 双轮沙箱预演</text>
+<text x="366" y="697" font-size="22" fill="#1D3B54" font-weight="400">隔离测试首轮、公布、分支、改答和结束。逐页返回校验回执。</text>
+<rect x="74" y="722" width="1452" height="52" rx="13" fill="#FFFFFF" stroke="#CBDAE5"/>
+<text x="96" y="756" font-size="23" fill="#087E87" font-weight="700">五项工具能力  /  多源搜图、精确数值绘图、页面校验、参考查证、提交与修订</text>
+<rect x="48" y="820" width="1504" height="148" rx="13" fill="#FFFFFF" stroke="#CBDAE5"/>
+<text x="74" y="862" font-size="26" fill="#087E87" font-weight="700">03  可复用的页内互动契约</text>
+<text x="74" y="903" font-size="23" fill="#1D3B54" font-weight="700">concept-diagnosis@1    step-fault@1    param-explorer@1    evidence-weighing@1</text>
+<text x="74" y="940" font-size="21" fill="#1D3B54" font-weight="400">以声明式 JSON 定义作答、公布、反馈与速查卡。</text>
+<rect x="48" y="988" width="1504" height="241" rx="13" fill="#15354F" stroke="#CBDAE5"/>
+<text x="74" y="1030" font-size="26" fill="#FFFFFF" font-weight="700">04  同页互动课件播放器</text>
+<text x="94" y="1077" font-size="23" fill="#E1F2FB" font-weight="400">教室投影与教师播控共用 16:9 讲义，翻页后可回看该页学情。</text>
+<text x="94" y="1121" font-size="23" fill="#E1F2FB" font-weight="400">六种视觉原型涵盖封面、章节页、推导、对比、例题和总结。</text>
+<text x="94" y="1165" font-size="23" fill="#E1F2FB" font-weight="400">学生手机跟随原页作答，课后可保存离线个人复习单。</text>
+<text x="48" y="1271" font-size="21" fill="#526C7D" font-weight="400">单文件内嵌 KaTeX 与 20 款字体，断网可翻页、排版公式、开展两轮互动。</text>
+</g></svg>

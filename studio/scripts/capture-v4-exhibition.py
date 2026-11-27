@@ -1,134 +1,456 @@
-"""V4 Phase 2: real UI captures at DPR2, offline verification and geometry receipts.
-Every exhibition source is a viewport screenshot (full_page=False).
-Only the two-phone layout is composited, from two unmodified mobile viewport captures.
-"""
-from pathlib import Path
+"""Capture the seven exhibition views from the isolated offline exports at DPR 2."""
+
+import argparse
 from io import BytesIO
-from urllib.parse import urlparse,parse_qs
-import json,os,socket,subprocess,time,shutil,urllib.request
-from PIL import Image,ImageDraw,ImageFont
-from playwright.sync_api import sync_playwright,expect
-S=Path(__file__).resolve().parents[1];SOURCE=S.parent;ROOT=SOURCE.parent.parent if SOURCE.name=='source' and SOURCE.parent.name=='.polyphony-work' else SOURCE;OUT=S/'artifacts/v4-phase2';OUT.mkdir(parents=True,exist_ok=True)
-NAMES=['01-双源AI备课中枢-从零生成原生课件与旧课件导入活化.png','02-原生课件流式播放器-C语言实战讲义双栏代码与内存表.png','03-页内原生融合互动-C代码逐行找茬就地热力图.png','04-页内原生动态公式沙盒-物理光学多缝衍射实时调控.png','05-大班翻转课堂页内思辨-大学英语实证阅读与盲盒AI辩友.png','06-学生手机端单页流式跟随-讲义同步与页内点选及速查卡抽屉.png','07-交互模组库与五阶段Harness架构协议总览.png']
-report={'consoleErrors':[],'pageErrors':[],'offlineRequests':[],'checks':[],'geometry':[],'screenshots':[]}
-FORBIDDEN=['课谱','总谱','排练','Playlab','史料','数字黑箱','夜校','TypeSafe','光电探究台','确定性物理数值引擎']
-def watch(page):
- page.on('pageerror',lambda e:report['pageErrors'].append(str(e)))
- page.on('console',lambda m:report['consoleErrors'].append(m.text) if m.type=='error' else None)
- page.on('dialog',lambda d:(_ for _ in ()).throw(AssertionError('Unexpected popup: '+d.message)))
- return page
-def ready(page):
- page.evaluate('document.fonts.ready');page.wait_for_timeout(200)
- page.evaluate('''async()=>{await Promise.all([...document.images].map(i=>i.complete?Promise.resolve():i.decode()))}''')
-def shot(page,index,stage=False):
- page.evaluate("document.activeElement?.blur();scrollTo({top:0,behavior:'instant'})");ready(page)
- g=page.evaluate('''()=>({viewport:[innerWidth,innerHeight],scrollY,doc:[document.documentElement.scrollWidth,document.documentElement.scrollHeight],
-  canvas:document.querySelector('.native-canvas')?.getBoundingClientRect().toJSON(),filmstrip:document.querySelector('.stage-filmstrip')?.getBoundingClientRect().toJSON(),
-  skipFocused:document.activeElement?.classList.contains('shell-skip'),dialogs:document.querySelectorAll('dialog[open]').length,
-  clipped:[...document.querySelectorAll('.native-canvas [data-native-slide],.native-canvas [data-inline-widget]:not([hidden])')].filter(e=>{let c=e.querySelector('.inline-content')??e.firstElementChild;return c&&c.getBoundingClientRect().bottom>e.getBoundingClientRect().bottom+3}).map(e=>e.className)})''')
- assert g['doc'][0]<=g['viewport'][0]+1 and not g['skipFocused'] and g['dialogs']==0,g
- if stage:
-  assert g['scrollY']==0 and g['canvas']['top']>=0 and g['canvas']['bottom']<1080 and g['filmstrip']['bottom']<=1080 and not g['clipped'],g
-  assert abs(g['canvas']['width']/g['canvas']['height']-16/9)<.01,g
- text=page.locator('body').inner_text();assert not any(v.lower() in text.lower() for v in FORBIDDEN)
- report['geometry'].append({'name':NAMES[index],**g});page.screenshot(path=str(OUT/NAMES[index]),full_page=False,animations='disabled')
- print('Captured '+NAMES[index],flush=True)
-def result(r):assert r.ok,(r.status,r.text()[:600]);return r.json()
-def start():
- sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close();env=os.environ.copy()
- for key in list(env):
-  if key.startswith('POLYPHONY_AI_'):env.pop(key,None)
- env.update(HOST='127.0.0.1',PORT=str(port),POLYPHONY_ROOM_FILE=str(OUT/'capture-rooms.json'))
- log=open(OUT/'capture-server.log','w',encoding='utf8');proc=subprocess.Popen(['node',str(S/'server.mjs')],cwd=S,env=env,stdout=log,stderr=subprocess.STDOUT,creationflags=subprocess.CREATE_NO_WINDOW)
- url=f'http://127.0.0.1:{port}'
- for _ in range(150):
-  try:
-   with urllib.request.urlopen(url+'/api/status',timeout=1):return proc,log,url
-  except Exception:time.sleep(.1)
- raise RuntimeError('server unavailable')
-def cmd(c,url,code,kind,payload=None):
- s=result(c.request.post(url+f'/api/rooms/{code}/session',data={'role':'teacher'}))['room']
- payload={**(payload or {}),'expectedLectureIndex':s['lecture']['index'],'expectedLectureTurn':s['lecture']['turn'],'expectedRound':s['round'],'expectedLessonId':s['lessonId']}
- return result(c.request.post(url+f'/api/rooms/{code}/commands',data={'role':'teacher','type':kind,'payload':payload}))['room']
-def loadscore(id):return json.loads((ROOT/'示例课件/V4原生实战课件'/f'{id}.json').read_text(encoding='utf8'))
-def room(c,url,id):return result(c.request.post(url+'/api/rooms',data={'lecture':loadscore(id)}))['room']['code']
-def setpage(c,url,code,index):cmd(c,url,code,'lectureNavigate',{'index':index})
-def activate(c,url,code,index):setpage(c,url,code,index);return cmd(c,url,code,'lectureInteract')
-def rounds(c,url,code):
- s=cmd(c,url,code,'demoFill');cmd(c,url,code,'reveal');cmd(c,url,code,'analyze');cmd(c,url,code,'branch',{'branchId':s['lesson']['branches'][0]['id']});cmd(c,url,code,'revise');cmd(c,url,code,'demoFill');cmd(c,url,code,'reveal');return cmd(c,url,code,'close')
-def stage(page,url,code,number):
- page.goto(url+f'/?view=stage&room={code}');page.locator('.lecture-frame-head h2').wait_for();page.wait_for_function('(n)=>document.querySelector(".native-player-bar p")?.textContent.includes("第 "+n+" / ")',arg=number);ready(page)
+import json
+from pathlib import Path
+import re
+from shutil import copy2, copyfile
+import sys
+from tempfile import TemporaryDirectory
+from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
-def offline(browser):
- for name in ['共演智课-单文件离线演示版.html','共演智课-交互模组库独立版.html']:
-  c=browser.new_context(viewport={'width':1440,'height':900},reduced_motion='reduce');page=watch(c.new_page())
-  def deny(route):report['offlineRequests'].append(route.request.url);route.abort()
-  c.route('http://**',deny);c.route('https://**',deny);base=(ROOT/name).as_uri();page.goto(base);page.wait_for_load_state('networkidle')
-  if '独立版' in name:
-   page.locator('[data-nav=materials]').first.click()
-  assert page.locator('[data-source-mode=import]').is_visible() and page.locator('[data-source-mode=native]').is_visible()
-  page.locator('[data-source-mode=native]').click();page.locator('[data-author-preset="1"]').click();assert '物理光学' in page.locator('[name=course]').input_value();page.locator('[data-source-mode=import]').click()
-  for id,total in [('deck-c-pointers',12),('deck-optics',10),('deck-english-seminar',10)]:
-   page.goto(base+'?view=materials');page.locator(f'[data-showcase="{id}"]').click();page.locator('[data-pacing]').select_option('full-demo');page.locator('[data-run-harness]').click();page.locator('[data-publish]').wait_for();assert page.locator('[data-page]').count()==total
-   assert page.locator('[data-stage][data-state=complete]').count()==5
-   page.locator('[data-publish]').click();page.locator('.native-canvas .lecture-frame-head h2').wait_for();teacher_url=page.url
-   mobile=watch(c.new_page());mobile.set_viewport_size({'width':390,'height':844});mobile.goto(teacher_url.replace('view=desk','view=student'));mobile.locator('.native-mobile-card').wait_for()
-   for i,p in enumerate(loadscore(id)['pages']):
-    page.bring_to_front()
-    page.locator(f'[data-slide-index="{i}"]').click();page.wait_for_function('(n)=>document.querySelector(".native-player-bar p")?.textContent.includes("第 "+n+" / ")',arg=i+1)
-    page.wait_for_function('(t)=>document.querySelector(".lecture-frame-head h2")?.textContent===t',arg=p['title'])
-    mobile.wait_for_function('(n)=>document.querySelector(".native-player-bar p")?.textContent.includes("第 "+n+" / ")',arg=i+1,polling=100)
-    if not p.get('interaction'):continue
-    page.locator('[data-inline-action=interact]').click();page.locator('[data-inline-widget]:not([hidden])').wait_for();mobile.locator('[data-inline-widget]:not([hidden])').wait_for()
-    mobile.bring_to_front()
-    if mobile.locator('[data-inline-join]').count():mobile.locator('[name=name]').fill('离线课堂同学');mobile.locator('[data-inline-join] button').click()
-    mobile.locator('[data-inline-response]').wait_for()
-    lesson=p['interaction'];choice=lesson.get('correctOptionId') or lesson['options'][0]['id']
-    if lesson['activityId']=='step-fault@1':mobile.locator(f'[data-step-select="{choice}"]').click()
-    else:mobile.locator(f'[name=optionId][value="{choice}"]').check()
-    mobile.locator('[data-reason="0"]').click();mobile.locator('.inline-submit').click();mobile.locator('.inline-submitted').wait_for()
-    page.bring_to_front()
-    page.locator('[data-inline-action=demoFill]').click();page.locator('[data-inline-action=reveal]').click();page.locator('[data-inline-action=analyze]').click()
-    if lesson['activityId']=='param-explorer@1':
-     page.bring_to_front();curve=page.locator('[data-curve="0"]');before=curve.get_attribute('d');page.locator('[data-module-slider="0"]').fill('0.7');page.wait_for_function('(d)=>document.querySelector("[data-curve]").getAttribute("d")!==d',arg=before)
-    if lesson['activityId']=='evidence-weighing@1':page.locator('[data-inline-action=toggleAiPeer]').click();page.locator('.module-peer').wait_for()
-    page.locator('[data-inline-action=branch]').click();page.locator('[data-inline-action=revise]').click();page.locator('[data-inline-action=demoFill]').click();page.locator('[data-inline-action=reveal]').click();page.locator('[data-inline-action=close]').click();mobile.locator('.inline-feedback').wait_for()
-    assert page.locator('dialog[open]').count()==0
-   mobile.locator('.native-takeaways summary').click();assert mobile.locator('.native-takeaways article').count()==3;mobile.close()
-   report['checks'].append({'bundle':name,'deck':id,'pages':total,'inlineInteractions':3,'mobileStream':True});print('Offline deck verified: '+name+' / '+id,flush=True)
-  page.goto(base+'?view=lab')
-  for i in range(4):page.locator(f'[data-module-tab="{i}"]').click();assert page.locator('.v3-inspector pre').inner_text().find('@1')>=0
-  page.locator('[data-protocol-overview]').click();ready(page);assert page.locator('.v4-architecture-panel img').evaluate('i=>i.naturalWidth===1600&&i.src.startsWith("data:")')
-  report['checks'].append({'bundle':name,'dualSource':True,'galleryModules':4,'embeddedArchitecture':True});c.close()
-  print('Offline verified: '+name,flush=True)
+from PIL import Image, ImageDraw, ImageFont
+from playwright.sync_api import Error as PlaywrightError, expect, sync_playwright
 
-proc,log,url=start()
-try:
- with sync_playwright() as p:
-  browser=p.chromium.launch(headless=True,channel='msedge',args=['--disable-background-timer-throttling','--disable-renderer-backgrounding','--disable-backgrounding-occluded-windows'])
-  c=browser.new_context(viewport={'width':1440,'height':900},device_scale_factor=2,reduced_motion='reduce');page=watch(c.new_page());page.goto(url);page.wait_for_load_state('networkidle');page.locator('[data-source-mode=native]').click();page.locator('[data-author-form]>button').click();page.locator('[data-publish]').wait_for(timeout=45000);shot(page,0)
-  pc=browser.new_context(viewport={'width':1920,'height':1080},device_scale_factor=2,reduced_motion='reduce');projection=watch(pc.new_page())
-  code=room(c,url,'deck-c-pointers');setpage(c,url,code,5);stage(projection,url,code,6);shot(projection,1,True)
-  activate(c,url,code,6);rounds(c,url,code);projection.wait_for_function('document.querySelector(".inline-paired")?.textContent.includes("92%")');stage(projection,url,code,7);shot(projection,2,True)
-  optic=room(c,url,'deck-optics');activate(c,url,optic,4);cmd(c,url,optic,'demoFill');cmd(c,url,optic,'reveal');stage(projection,url,optic,5);projection.locator('[data-module-slider="0"]').fill('0.55');projection.locator('[data-module-slider="1"]').fill('6');shot(projection,3,True)
-  english=room(c,url,'deck-english-seminar');activate(c,url,english,7);cmd(c,url,english,'demoFill');cmd(c,url,english,'reveal');cmd(c,url,english,'toggleAiPeer');stage(projection,url,english,8);projection.locator('.module-peer').wait_for();shot(projection,4,True)
-  # Separate classroom keeps the mobile capture's independent first vote intact.
-  mobile_code=room(c,url,'deck-c-pointers');activate(c,url,mobile_code,3);rounds(c,url,mobile_code);activate(c,url,mobile_code,6)
-  mc=browser.new_context(viewport={'width':390,'height':844},device_scale_factor=2,is_mobile=True,has_touch=True,reduced_motion='reduce');phone=watch(mc.new_page());phone.goto(url+f'/?view=student&room={mobile_code}');phone.locator('[name=name]').fill('课堂同学');phone.locator('[data-inline-join] button').click();phone.locator('[data-step-select=S3]').click();phone.locator('[data-reason="0"]').click();phone.evaluate('document.activeElement?.blur();scrollTo(0,0)');ready(phone);left=Image.open(BytesIO(phone.screenshot(full_page=False))).convert('RGB');left.save(OUT/'phone-left-2x.png')
-  phone.locator('[data-inline-response] .inline-submit').click();s=cmd(c,url,mobile_code,'demoFill');cmd(c,url,mobile_code,'reveal');cmd(c,url,mobile_code,'analyze');cmd(c,url,mobile_code,'branch',{'branchId':s['lesson']['branches'][0]['id']});cmd(c,url,mobile_code,'revise');phone.locator('[data-step-select=S4]').click();phone.locator('[data-reason="1"]').click();phone.locator('[data-inline-response] .inline-submit').click();cmd(c,url,mobile_code,'demoFill');cmd(c,url,mobile_code,'reveal');cmd(c,url,mobile_code,'close');phone.locator('.inline-feedback').wait_for();phone.locator('.native-takeaways summary').click();ready(phone);phone.evaluate('document.activeElement?.blur();scrollTo({top:0,behavior:"instant"})');phone.wait_for_timeout(100);right=Image.open(BytesIO(phone.screenshot(full_page=False))).convert('RGB');right.save(OUT/'phone-right-2x.png')
-  assert left.size==right.size==(780,1688)
-  im=Image.new('RGB',(1720,1900),'#F0F5F9');d=ImageDraw.Draw(im);font=lambda n:ImageFont.truetype('C:/Windows/Fonts/msyh.ttc',n)
-  d.text((48,24),'学生单页流式跟随 · 讲义、作答与速查卡同页贯通',font=font(38),fill='#17354F');d.text((48,90),'R1 · 同步第 7 / 12 页：点选代码行与三秒直觉',font=font(23),fill='#087E87');d.text((900,90),'R2 · 页内反馈与已解锁考前速查卡',font=font(23),fill='#087E87');im.paste(left,(40,155));im.paste(right,(900,155));im.save(OUT/NAMES[5]);mc.close()
-  page.goto(url+'/?view=lab');page.locator('[data-module-tab="0"]').click();page.locator('[data-protocol-overview]').click();shot(page,6)
-  # Real legacy PDF through Tab 1, retaining every visual page before publishing.
-  page.goto(url+'/?view=materials');page.locator('[data-source-mode=import]').click();page.locator('[data-file]').set_input_files(str(next((ROOT/'示例课件').glob('04-*.pdf'))));page.locator('[data-page]').first.wait_for(timeout=60000);assert page.locator('[data-page]').count()==8;page.locator('[data-run-harness]').click();page.locator('[data-publish]').wait_for();page.locator('[data-publish]').click();page.locator('.lecture-frame-original img').wait_for();report['checks'].append({'legacyPdfUi':True,'originalVisualPages':8})
-  offline(browser);browser.close()
- assert not report['consoleErrors'] and not report['pageErrors'] and not report['offlineRequests'],report
- for n in NAMES:
-  im=Image.open(OUT/n);report['screenshots'].append({'name':n,'pixels':list(im.size),'dpr':2});shutil.copy2(OUT/n,ROOT/n);shutil.copy2(OUT/n,SOURCE/n)
-finally:
- proc.terminate()
- try:proc.wait(timeout=8)
- except subprocess.TimeoutExpired:proc.kill();proc.wait()
- log.close();report['serverStopped']=proc.poll() is not None;(OUT/'browser-report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8')
-print(json.dumps(report,ensure_ascii=False,indent=2))
+
+STUDIO = Path(__file__).resolve().parents[1]
+SOURCE = STUDIO.parent
+ROOT = SOURCE.parents[1] if SOURCE.name == 'source' and SOURCE.parent.name == '.polyphony-work' else SOURCE
+OFFLINE = ['共演智课-离线平台.html', '共演智课-单文件离线演示版.html']
+NAMES = [
+    '01-双源AI备课中枢-从零生成原生课件与旧课件导入活化.png',
+    '02-原生课件流式播放器-C语言实战讲义双栏代码与内存表.png',
+    '03-页内原生融合互动-C代码逐行找茬就地热力图.png',
+    '04-页内原生动态公式沙盒-物理光学多缝衍射实时调控.png',
+    '05-大班翻转课堂页内思辨-大学英语实证阅读与盲盒AI辩友.png',
+    '06-学生手机端单页流式跟随-讲义同步与页内点选及速查卡抽屉.png',
+    '07-交互模组库与五阶段Harness架构协议总览.png',
+]
+VIEWPORT = {'width': 1920, 'height': 1080}
+PHONE = {'width': 390, 'height': 844}
+PIXELS = (3840, 2160)
+DPR = 2
+ARCHETYPES = ['cover', 'section', 'derivation', 'split-compare', 'example', 'summary']
+
+
+def launch_browser(playwright):
+    chromium = playwright.chromium
+    choices = ([{}] if Path(chromium.executable_path).is_file() else []) + [
+        {'channel': 'chrome'}, {'channel': 'msedge'},
+    ]
+    errors = []
+    for choice in choices:
+        try:
+            browser = chromium.launch(
+                headless=True, **choice, args=['--disable-background-timer-throttling',
+                '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'],
+            )
+            return browser, choice.get('channel', 'chromium')
+        except PlaywrightError as error:
+            errors.append(str(error))
+    raise RuntimeError('No installed Chromium, Chrome, or Edge could run: ' + '\n'.join(errors))
+
+
+def watch(context, report):
+    def watch_page(page):
+        page.on('pageerror', lambda error: report['pageErrors'].append(str(error)))
+        page.on('console', lambda message: report['consoleErrors'].append(message.text) if message.type == 'error' else None)
+        page.on('websocket', lambda socket: report['offlineRequests'].append(socket.url))
+        def guard_dialog(dialog):
+            report['pageErrors'].append(f'Unexpected dialog: {dialog.message}')
+            dialog.dismiss()
+        page.on('dialog', guard_dialog)
+    context.on('page', watch_page)
+    def guard_request(request):
+        scheme = urlsplit(request.url).scheme
+        if scheme in {'http', 'https', 'ws', 'wss'} or (scheme == 'file' and request.resource_type != 'document'):
+            report['offlineRequests'].append(request.url)
+    context.on('request', guard_request)
+
+
+def geometry(page, required, stage=False, top=True):
+    page.bring_to_front()
+    page.evaluate("document.activeElement?.blur()")
+    if top:
+        page.evaluate("scrollTo({top:0,behavior:'instant'})")
+    page.evaluate("""async () => {
+        await document.fonts.ready;
+        await Promise.all([...document.images].filter(image => image.getClientRects().length)
+          .map(image => image.complete ? Promise.resolve() : image.decode()));
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }""")
+    g = page.evaluate("""({ required, stage }) => {
+        const clipped = [], root = document.documentElement;
+        const bounds = element => element?.getBoundingClientRect().toJSON() ?? null;
+        const viewport = { top: 0, left: 0, bottom: innerHeight, right: innerWidth };
+        const inside = (inner, outer) => inner && inner.height > 0 && outer &&
+          inner.top >= outer.top - 3 && inner.left >= outer.left - 3 &&
+          inner.bottom <= outer.bottom + 3 && inner.right <= outer.right + 3;
+        for (const selector of required) {
+          if (!inside(bounds(document.querySelector(selector)), viewport)) clipped.push(selector);
+        }
+        const canvas = document.querySelector('.native-canvas');
+        const filmstrip = document.querySelector('.stage-filmstrip');
+        if (stage) {
+          for (const [owner, selector] of [
+            ['[data-native-slide]', '.lecture-frame'], ['.native-inline', '.inline-content'],
+            ['.lecture-frame', '.slide-diagram svg'], ['.lecture-frame', '.katex-display'],
+            ['.inline-content', '[data-curve-plot]'], ['.inline-content', '.module-peer'],
+          ]) {
+            const section = canvas?.querySelector(owner);
+            for (const element of section?.querySelectorAll(selector) ?? []) {
+              const rect = bounds(element);
+              if (rect.height > 0 && (!inside(rect, bounds(section)) || !inside(rect, bounds(canvas)))) clipped.push(selector);
+            }
+          }
+          if (!inside(bounds(canvas), viewport)) clipped.push('.native-canvas');
+          if (!inside(bounds(filmstrip), viewport)) clipped.push('.stage-filmstrip');
+        }
+        if (root.scrollWidth > innerWidth + 1) clipped.push('document width');
+        return {
+          viewport: [innerWidth, innerHeight], dpr: devicePixelRatio,
+          scrollY, doc: [root.scrollWidth, root.scrollHeight],
+          canvas: bounds(canvas), filmstrip: bounds(filmstrip), clipped,
+          dialogs: document.querySelectorAll('dialog[open]').length,
+          emptySourceTranscripts: [...document.querySelectorAll('.lecture-frame-transcript')]
+            .filter(details => !details.querySelector('.lecture-frame-text')?.textContent.trim()).length,
+        };
+      }""", {'required': required, 'stage': stage})
+    assert g['clipped'] == [] and g['dialogs'] == g['emptySourceTranscripts'] == 0 and g['dpr'] == DPR, g
+    if top:
+        assert g['scrollY'] == 0, g
+    if stage:
+        assert abs(g['canvas']['width'] / g['canvas']['height'] - 16 / 9) < .01, g
+    return g
+
+
+def shot(page, number, directory, report, *, required=(), stage=False):
+    name = NAMES[number - 1]
+    g = geometry(page, list(required), stage)
+    assert g['viewport'] == [1920, 1080], g
+    page.screenshot(path=str(directory / name), full_page=False, animations='disabled')
+    report['geometry'].append({'name': name, **g})
+
+
+def view_url(url, view):
+    parsed = urlsplit(url)
+    params = parse_qs(parsed.query)
+    params['view'] = [view]
+    return urlunsplit(parsed._replace(query=urlencode(params, doseq=True)))
+
+
+def control(scope, action):
+    return scope.locator(f'[data-inline-action="{action}"]')
+
+
+def materials(page):
+    expect(page.get_by_role('button', name='导入课件', exact=True)).to_be_visible()
+    expect(page.get_by_role('button', name='AI 备课', exact=True)).to_be_visible()
+    expect(page.locator('.harness-pipeline > li')).to_have_count(5)
+    expect(page.get_by_role('heading', name='我的备课版本库')).to_be_visible()
+
+
+def ensure_drawer(page):
+    toggle = page.locator('[data-demo-toggle]')
+    expect(toggle).to_be_visible()
+    if toggle.get_attribute('aria-expanded') == 'false':
+        toggle.click()
+    expect(page.locator('[data-demo-panel]')).to_be_visible()
+
+
+def launch_deck(page, index, expected_pages):
+    ensure_drawer(page)
+    page.locator(f'[data-demo-teach="{index}"]').click()
+    main = page.locator('.native-split-stage')
+    expect(main.locator('[data-lecture-page] option')).to_have_count(expected_pages)
+    expect(page.locator('.native-split-companion [data-native-player]')).to_be_visible()
+    expect(page.locator('[data-demo-panel]')).to_be_hidden()
+    return main
+
+
+def show_stage(teacher, projection, index, *, interactive=False):
+    url = view_url(teacher.url, 'stage')
+    if projection.url != url:
+        projection.goto(url)
+    expect(projection.locator('.native-player-bar p')).to_contain_text(re.compile(fr'第 {index + 1} / '))
+    expect(projection.locator('.lecture-frame-head h2')).to_be_visible()
+    if interactive:
+        expect(projection.locator('.native-inline')).to_be_visible()
+
+
+def choose_page(main, index, *, interact=False):
+    picker = main.locator('[data-lecture-page]')
+    picker.select_option(str(index))
+    expect(picker).to_have_value(str(index))
+    expect(main.locator('.lecture-frame-head h2')).to_be_visible()
+    if interact:
+        control(main, 'interact').click()
+        expect(main.locator('.native-inline')).to_be_visible()
+
+
+def finish_two_rounds(main):
+    control(main, 'demoFill').click()
+    expect(main.locator('.inline-live-count b')).not_to_have_text('0')
+    control(main, 'reveal').click()
+    expect(main.locator('.inline-reason-split article').first).to_be_visible()
+    control(main, 'secondRound').click()
+    expect(main.locator('.native-inline .inline-heading b')).to_contain_text('R2')
+    control(main, 'demoFill').click()
+    expect(main.locator('.inline-live-count b')).not_to_have_text('0')
+    control(main, 'reveal').click()
+    expect(main.locator('.inline-round-shift').first).to_be_visible()
+    expect(main.locator('.inline-excerpts')).to_be_visible()
+    control(main, 'close').click()
+    expect(main.locator('.inline-feedback')).to_be_visible()
+
+
+def do_student_step(main, phone, line, reason_index):
+    form = phone.locator('[data-inline-response]')
+    expect(form).to_be_visible()
+    form.locator(f'[data-reason="{reason_index}"]').click()
+    phone.locator(f'[data-step-select="{line}"]').click()
+    form.locator('.inline-submit').click()
+    expect(form.locator('.inline-submitted')).to_be_visible()
+    expect(main.locator('.inline-live-count b')).to_have_text('1')
+
+
+def mobile_capture(teacher, context, directory, report):
+    main = launch_deck(teacher, 0, 12)
+    choose_page(main, 3, interact=True)
+    finish_two_rounds(main)
+    choose_page(main, 5)
+
+    phone = context.new_page()
+    phone.set_viewport_size(PHONE)
+    phone.goto(view_url(teacher.url, 'student'))
+    control(phone, 'bookmark').click()
+    control(phone, 'slidePulse').click()
+    expect(main.locator('.native-filmstrip')).to_contain_text('?1')
+    choose_page(main, 6, interact=True)
+    phone.locator('[name=name]').fill('演示同学')
+    phone.locator('[data-inline-join] button').click()
+    expect(phone.locator('[data-step-select="S3"]')).to_be_visible()
+    phone.locator('[data-step-select="S3"]').click()
+    phone.locator('[data-reason="0"]').click()
+    left_g = geometry(phone, ['.lecture-frame-head h2', '[data-step-select="S3"]', '[data-reason="0"]'])
+    left = Image.open(BytesIO(phone.screenshot(full_page=False, animations='disabled'))).convert('RGB')
+
+    do_student_step(main, phone, 'S3', 0)
+    control(main, 'reveal').click()
+    expect(main.locator('.inline-excerpts')).to_be_visible()
+    control(main, 'secondRound').click()
+    do_student_step(main, phone, 'S4', 1)
+    control(main, 'reveal').click()
+    expect(main.locator('.inline-round-shift').first).to_be_visible()
+    expect(main.locator('.inline-excerpts')).to_be_visible()
+    control(main, 'close').click()
+    expect(phone.locator('.inline-feedback')).to_be_visible()
+    main.locator('.presenter-more > summary').click()
+    control(main, 'finish').click()
+    expect(phone.locator('.lecture-ended')).to_be_visible()
+    phone.locator('.native-takeaways summary').click()
+    download = phone.locator('.lecture-ended > [data-inline-action="downloadReview"]')
+    expect(download).to_be_visible()
+    right_g = geometry(phone, ['.lecture-ended h1', '.lecture-ended > [data-inline-action="downloadReview"]',
+                               '.native-takeaways summary', '.native-takeaways article:last-child'])
+    right = Image.open(BytesIO(phone.screenshot(full_page=False, animations='disabled'))).convert('RGB')
+    with phone.expect_download() as saved:
+        download.click()
+    review_path = directory / 'review.html'
+    saved.value.save_as(str(review_path))
+
+    printed = context.new_page()
+    printed.set_viewport_size({'width': 650, 'height': PHONE['height']})
+    printed.goto(review_path.as_uri())
+    expect(printed.get_by_role('heading', level=1)).to_be_visible()
+    expect(printed.locator('body')).to_contain_text('swap_bug')
+    report_g = geometry(printed, ['h1'])
+    review = Image.open(BytesIO(printed.screenshot(full_page=False, animations='disabled'))).convert('RGB')
+    assert left.size == right.size == (780, 1688) and review.size == (1300, 1688)
+
+    board = Image.new('RGB', PIXELS, '#eff4f8')
+    drawing = ImageDraw.Draw(board)
+    def font(size):
+        for path in ['C:/Windows/Fonts/msyh.ttc', 'C:/Windows/Fonts/simhei.ttf']:
+            if Path(path).is_file():
+                return ImageFont.truetype(path, size)
+        return ImageFont.load_default(size=size)
+    drawing.text((208, 75), '学生手机跟随与个人复习单', font=font(64), fill='#17354f')
+    items = [(208, left, '独立作答'), (1250, right, '结课速查与保存入口'), (2300, review, '离线个人复习单')]
+    rectangles = []
+    for x, panel, title in items:
+        y = 300
+        box = (x, y, x + panel.width, y + panel.height)
+        assert 0 <= x < box[2] <= PIXELS[0] and 0 <= y < box[3] <= PIXELS[1]
+        drawing.text((x, 205), title, font=font(42), fill='#087980')
+        drawing.rectangle((x - 2, y - 2, box[2] + 1, box[3] + 1), outline='#b4c5d3', width=2)
+        board.paste(panel, (x, y))
+        rectangles.append({'title': title, 'pixels': panel.size, 'box': box})
+    board.save(directory / NAMES[5])
+    report['geometry'].append({
+        'name': NAMES[5], 'viewport': [1920, 1080], 'dpr': DPR, 'clipped': [],
+        'panels': rectangles, 'mobileGeometries': [left_g, right_g], 'reportGeometry': report_g,
+    })
+    report['checks'].append({'personalReviewHtml': True, 'mobileViewports': [left_g['viewport'], right_g['viewport']]})
+    phone.close()
+    printed.close()
+
+
+def verify_archetypes(teacher, report):
+    ensure_drawer(teacher)
+    teacher.locator('[data-demo-preview="1"]').click()
+    preview = teacher.locator('.prep-slide-stage .lecture-frame')
+    expect(preview).to_have_attribute('data-archetype', 'cover')
+    teacher.locator('.prep-page-list [data-page="1"]').click()
+    chooser = teacher.locator('[data-page-archetype]')
+    expect(chooser).to_be_visible()
+    expect(chooser.locator('option')).to_have_count(1 + len(ARCHETYPES))
+    for archetype in ARCHETYPES:
+        chooser.select_option(archetype)
+        expect(preview).to_have_attribute('data-archetype', archetype)
+        expect(preview.locator('h2')).to_be_visible()
+        expect(preview.locator('.lecture-frame-transcript')).to_have_count(0)
+    report['checks'].append({'slideArchetypes': ARCHETYPES, 'emptySourceTranscripts': 0})
+
+
+def capture(context, directory, report, bundle_directory):
+    platform_file = directory / 'platform.html'
+    demo_file = directory / 'demo.html'
+    copyfile(bundle_directory / OFFLINE[0], platform_file)
+    copyfile(bundle_directory / OFFLINE[1], demo_file)
+
+    platform = context.new_page()
+    platform.goto(platform_file.as_uri())
+    materials(platform)
+    expect(platform.locator('[data-demo-toggle]')).to_have_count(0)
+    shot(platform, 1, directory, report, required=('.prep-entry', '.harness-pipeline', '[data-agent-tools]'))
+    report['checks'].append({'bundle': OFFLINE[0], 'dualSource': True, 'demoDrawer': False, 'agentToolPanel': True})
+
+    teacher = context.new_page()
+    teacher.goto(demo_file.as_uri())
+    materials(teacher)
+    expect(teacher.locator('[data-demo-toggle]')).to_have_attribute('aria-expanded', 'false')
+    expect(teacher.locator('[data-demo-panel]')).to_be_hidden()
+    report['checks'].append({'bundle': OFFLINE[1], 'dualSource': True, 'demoDrawer': 'collapsed'})
+    projection = context.new_page()
+
+    main = launch_deck(teacher, 0, 12)
+    choose_page(main, 5)
+    show_stage(teacher, projection, 5)
+    expect(projection.locator('.slide-code-pair')).to_be_visible()
+    expect(projection.locator('.slide-diagram svg')).to_be_visible()
+    shot(projection, 2, directory, report, required=('.slide-code-pair', '.slide-diagram svg'), stage=True)
+
+    choose_page(main, 6, interact=True)
+    finish_two_rounds(main)
+    show_stage(teacher, projection, 6, interactive=True)
+    expect(projection.locator('.inline-paired')).to_be_visible()
+    expect(projection.locator('.inline-feedback')).to_be_visible()
+    shot(projection, 3, directory, report, required=('.inline-paired', '.inline-feedback'), stage=True)
+    report['checks'].append({'course': 'C', 'slides': 12, 'fiveBeatResults': True})
+
+    main = launch_deck(teacher, 1, 10)
+    choose_page(main, 4, interact=True)
+    control(main, 'demoFill').click()
+    expect(main.locator('.inline-live-count b')).not_to_have_text('0')
+    control(main, 'reveal').click()
+    show_stage(teacher, projection, 4, interactive=True)
+    plot = projection.locator('[data-curve-plot]').first
+    expect(plot).to_be_visible()
+    expect(projection.locator('[data-native-slide] .katex-display .katex-html').first).to_be_visible()
+    expect(projection.locator('[data-native-slide] math[display=block]').first).to_be_attached()
+    assert projection.evaluate('''async () => {
+        const fonts = [...document.fonts].filter(face => face.family.replace(/["']/g, '').startsWith('KaTeX_'));
+        await Promise.all(fonts.map(face => face.load()));
+        return fonts.length === 20 && fonts.every(face => face.status === 'loaded');
+    }''')
+    projection.get_by_role('button', name='📌 锁定对照曲线', exact=True).click()
+    ghost = projection.locator('path[data-ghost-curve]').first
+    curve = projection.locator('[data-curve="0"]').first
+    expect(ghost).to_be_visible()
+    frozen = ghost.get_attribute('d')
+    projection.locator('[data-module-slider="0"]').fill('0.55')
+    projection.locator('[data-module-slider="1"]').fill('6')
+    expect(curve).not_to_have_attribute('d', frozen)
+    expect(ghost).to_have_attribute('d', frozen)
+    expect(ghost).to_have_attribute('stroke-dasharray', '7 5')
+    shot(projection, 4, directory, report,
+         required=('[data-curve-plot]', 'path[data-ghost-curve]', '[data-native-slide] .katex-display'), stage=True)
+    report['checks'].append({'course': 'optics', 'slides': 10, 'offlineKaTeXFonts': 20, 'lockedComparison': True})
+
+    main = launch_deck(teacher, 2, 10)
+    choose_page(main, 7, interact=True)
+    control(main, 'demoFill').click()
+    expect(main.locator('.inline-live-count b')).not_to_have_text('0')
+    control(main, 'reveal').click()
+    expect(main.locator('.inline-reason-split article').first).to_be_visible()
+    main.locator('[data-module-peer]').click()
+    show_stage(teacher, projection, 7, interactive=True)
+    expect(projection.locator('.module-peer')).to_be_visible()
+    shot(projection, 5, directory, report,
+         required=('.module-peer', '.slide-list'), stage=True)
+    report['checks'].append({'course': 'English', 'slides': 10, 'evidencePeer': True})
+
+    mobile_capture(teacher, context, directory, report)
+    verify_archetypes(teacher, report)
+
+    platform.locator('.shell-nav [data-nav=lab]').click()
+    expect(platform.get_by_role('heading', name='交互模组库', exact=True)).to_be_visible()
+    for i in range(4):
+        platform.locator(f'[data-module-tab="{i}"]').click()
+        expect(platform.locator('.v3-inspector pre')).to_contain_text('@1')
+    platform.locator('[data-module-tab="0"]').click()
+    platform.get_by_role('button', name='Harness 架构与契约同屏', exact=True).click()
+    panel = platform.locator('.v4-architecture-panel img')
+    expect(panel).to_be_visible()
+    assert panel.evaluate('image => image.naturalWidth === 1600 && image.src.startsWith("data:")')
+    shot(platform, 7, directory, report, required=('.v4-architecture-panel img', '.v3-inspector'))
+    report['checks'].append({'galleryModules': 4, 'embeddedArchitecture': True})
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--staging-only', action='store_true', help='Keep the verified captures in the QA folder.')
+    parser.add_argument('--bundle-dir', type=Path, default=ROOT, help='Directory containing the two offline HTML files.')
+    options = parser.parse_args()
+    output = STUDIO / 'artifacts/sprint4b-qa/exhibition'
+    output.mkdir(parents=True, exist_ok=True)
+    report = {'consoleErrors': [], 'pageErrors': [], 'offlineRequests': [], 'checks': [], 'geometry': [], 'screenshots': []}
+    try:
+        with TemporaryDirectory(prefix='exhibition-', dir=output) as folder, sync_playwright() as playwright:
+            temp = Path(folder)
+            browser, channel = launch_browser(playwright)
+            report['browser'] = f'{channel} {browser.version}'
+            print(f'Browser: {report["browser"]}', flush=True)
+            try:
+                context = browser.new_context(viewport=VIEWPORT, device_scale_factor=DPR, reduced_motion='reduce',
+                                              offline=True, accept_downloads=True)
+                watch(context, report)
+                capture(context, temp, report, options.bundle_dir)
+                context.close()
+            finally:
+                browser.close()
+            assert all(not report[key] for key in ['consoleErrors', 'pageErrors', 'offlineRequests']), report
+            assert [g['name'] for g in report['geometry']] == NAMES and all(not g['clipped'] for g in report['geometry'])
+            for name in NAMES:
+                with Image.open(temp / name) as image:
+                    assert image.size == PIXELS, (name, image.size)
+                    image.verify()
+                report['screenshots'].append({'name': name, 'pixels': list(PIXELS), 'dpr': DPR})
+            for item in report['screenshots']:
+                name = item['name']
+                copy2(temp / name, output / name)
+                if not options.staging_only:
+                    for target in {ROOT, SOURCE}:
+                        copy2(output / name, target / name)
+                print(f'{name} | {PIXELS[0]}×{PIXELS[1]} | 1920×1080 @2x | clipped=[]', flush=True)
+    finally:
+        receipt = output / 'browser-report.json'
+        receipt.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+    print(f'PASS: 7/7 captures, 0 external requests, 0 console errors, 0 page errors. Receipt: {receipt}')
+
+
+if __name__ == '__main__':
+    sys.stdout.reconfigure(encoding='utf-8')
+    main()

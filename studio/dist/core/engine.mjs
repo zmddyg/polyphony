@@ -412,7 +412,7 @@ export function analyze(state) {
     if (response.round === state.round) (response.simulated ? simulated : live).push(response);
   }
   const sample = live.length ? live : simulated;
-  const tallies = new Map(state.lesson.options.map(({ id }) => [id, { count: 0, example: null }]));
+  const tallies = new Map(state.lesson.options.map(({ id }) => [id, { count: 0, example: null, excerpts: [] }]));
   let reasonCount = 0;
   for (const response of sample) {
     if (response.reason) reasonCount++;
@@ -420,6 +420,10 @@ export function analyze(state) {
     if (!tally) continue;
     tally.count++;
     if (!tally.example || (!tally.example.reason && response.reason)) tally.example = response;
+    if (tally.excerpts.length < 2) {
+      const reason = response.reason?.trim();
+      if (reason) tally.excerpts.push(reason.slice(0, 140).replace(/[\uD800-\uDBFF]$/u, ''));
+    }
   }
   const count = id => tallies.get(id)?.count ?? 0;
   const ranked = state.lesson.options.filter(({ id }) => count(id) > 0).sort((a, b) => count(b.id) - count(a.id));
@@ -488,6 +492,7 @@ export function analyze(state) {
       sideLabel: (index===0?'待核验解释':'对照解释（同样需证据）')+' · 选择 '+String.fromCharCode(65+state.lesson.options.findIndex(o=>o.id===response.optionId)),
       tone: index === 0 ? 'alert' : 'insight', quote: response.reason,
     })),
+    optionExcerpts: Object.fromEntries([...tallies].map(([id, { excerpts }]) => [id, excerpts])),
     branches: clone(state.lesson.branches),
     recommendedId: focus && reasonCount > 1 ? focus.branch : state.lesson.branches[0].id,
     source: 'local',

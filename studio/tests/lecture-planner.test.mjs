@@ -36,7 +36,7 @@ test('arbitrary professional concepts stay grounded and no fixed experiment is f
 test('configured concept diagnosis receives the actual professional page and rejects fabricated quotations', async () => {
   const page = createDemoMaterial('deck-photonics').pages[3];
   let quote = '行波微波衰减';
-  const provider = { baseUrl:'https://provider.example/v1',model:'test',key:'test',outputMode:'json_schema',
+  const provider = { baseUrl:'https://provider.example/v1',model:'test',key:'fixture-planner-credential',outputMode:'json_schema',
     fetchImpl:async (_url, request) => {
       const payload = JSON.parse(request.body);
       const input = JSON.parse(payload.messages[1].content);

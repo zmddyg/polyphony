@@ -1,7 +1,7 @@
 import { moduleHtml, bindModule } from './module-renderer.mjs';
 import { getActivity } from '../core/activities.mjs';
 import { assignedPhase, phaseLabel } from '../core/optics.mjs';
-import { formulaHtml } from '../core/formula-text.mjs';
+import { renderRichMathHtml } from '../core/math-render.mjs';
 
 export function takeawayCard(state, participantId, esc) {
   if (state.phase !== 'closed') return '';
@@ -13,7 +13,9 @@ export function takeawayCard(state, participantId, esc) {
     const index = state.lesson.options.findIndex(o => o.id === answer.optionId);
     return `${String.fromCharCode(65+index)} · ${answer.reason || state.lesson.options[index]?.label || answer.optionId}`;
   };
-  return `<section class="ps-takeaway" aria-label="本页考前速查卡"><header><span>留给考前的你</span><h2>本页考前速查卡</h2></header><div class="ps-formula">${formulaHtml(takeaway.formula??takeaway.summary??'')}</div><h3>我的作答演进</h3><ol><li><span>第 1 轮</span><p>${esc(label(1))}</p></li><li><span>第 2 轮 →</span><p>${esc(label(2))}</p></li></ol><p class="ps-pitfall"><strong>工程 / 考试避坑</strong>${esc(takeaway.pitfall)}</p><footer>原页${state.lecture ? `第 ${esc(state.lecture.pageNumber)} 页 · ` : '要点 · '}可截屏带走</footer></section>`;
+  const formula = takeaway.formula == null ? renderRichMathHtml(takeaway.summary)
+    : renderRichMathHtml(takeaway.formula, { block: true });
+  return `<section class="ps-takeaway" aria-label="本页考前速查卡"><header><span>留给考前的你</span><h2>本页考前速查卡</h2></header><div class="ps-formula">${formula}</div><h3>我的作答演进</h3><ol><li><span>第 1 轮</span><p>${renderRichMathHtml(label(1))}</p></li><li><span>第 2 轮 →</span><p>${renderRichMathHtml(label(2))}</p></li></ol><p class="ps-pitfall"><strong>工程 / 考试避坑</strong>${renderRichMathHtml(takeaway.pitfall)}</p><footer>原页${state.lecture ? `第 ${esc(state.lecture.pageNumber)} 页 · ` : '要点 · '}可截屏带走</footer></section>`;
 }
 
 const mounted = new WeakMap();
@@ -53,21 +55,21 @@ function promptFor(state) {
 
 function responseText(response, option, esc) {
   const sample = response.sample;
-  return `<strong>${esc(option?.label ?? response.optionId)}</strong>${sample ? `<span>相位差 ${esc(phaseLabel(sample.phaseIndex))} · 预测光强 ${Math.round(sample.power * 100)}%</span>` : ''}`;
+  return `<strong>${renderRichMathHtml(option?.label ?? response.optionId)}</strong>${sample ? `<span>相位差 ${esc(phaseLabel(sample.phaseIndex))} · 预测光强 ${Math.round(sample.power * 100)}%</span>` : ''}`;
 }
 
 function responseReceipt(response, option, ctx, collecting) {
   if (!response) return '';
   return `<div class="ps-receipt"><span class="ps-icon ps-icon--success">${ctx.icon('check', 19)}</span><div>
     <b>本轮回答已提交</b>${responseText(response, option, ctx.esc)}
-    ${!collecting && response.reason ? `<p>${ctx.esc(response.reason)}</p>` : ''}</div></div>`;
+    ${!collecting && response.reason ? `<p>${renderRichMathHtml(response.reason)}</p>` : ''}</div></div>`;
 }
 
 function previousAnswer(response, option, ctx, open) {
   if (!response) return '';
   return `<details class="ps-side-card ps-previous"${open ? ' open' : ''}>
     <summary id="student-previous">${ctx.icon('replay', 18)}<strong>第 ${ctx.esc(response.round)} 轮的回答</strong>${ctx.icon('chevron-down', 16)}</summary>
-    <div>${responseText(response, option, ctx.esc)}${response.reason ? `<p>${ctx.esc(response.reason)}</p>` : ''}</div>
+    <div>${responseText(response, option, ctx.esc)}${response.reason ? `<p>${renderRichMathHtml(response.reason)}</p>` : ''}</div>
   </details>`;
 }
 
@@ -89,7 +91,7 @@ function progressCard(state, participant, ctx) {
 }
 
 function results(state, current, response, ctx) {
-  const { esc, icon } = ctx;
+  const { icon } = ctx;
   const { options } = state.lesson;
   const count = state.responseCount ?? current.length;
   const simulated = state.simulatedResponseCount ?? current.filter(item => item.simulated).length;
@@ -97,12 +99,12 @@ function results(state, current, response, ctx) {
     const votes = current.filter(item => item.optionId === option.id).length;
     const percent = Math.round(votes * 100 / count);
     const isMine = response?.optionId === option.id;
-    return `<li class="ps-result${isMine ? ' is-mine' : ''}"><div class="ps-result-name"><span class="ps-letter">${String.fromCharCode(65 + index)}</span><strong>${esc(option.label)}${isMine ? '<small>我的选择</small>' : ''}</strong><span class="ps-result-count"><b>${percent}%</b><span>${votes} 票</span></span></div><div class="ps-result-track" aria-hidden="true"><span style="width:${percent}%"></span></div></li>`;
+    return `<li class="ps-result${isMine ? ' is-mine' : ''}"><div class="ps-result-name"><span class="ps-letter">${String.fromCharCode(65 + index)}</span><strong>${renderRichMathHtml(option.label)}${isMine ? '<small>我的选择</small>' : ''}</strong><span class="ps-result-count"><b>${percent}%</b><span>${votes} 票</span></span></div><div class="ps-result-track" aria-hidden="true"><span style="width:${percent}%"></span></div></li>`;
   }) : [];
   return `<section class="ps-card ps-results" aria-labelledby="student-results-title">
     <div class="ps-card-heading"><span class="ps-icon">${icon('chart', 18)}</span><div><h2 id="student-results-title">全班作答</h2><p>${count} 份作答${simulated ? ` · 含 ${simulated} 份模拟` : ''}</p></div></div>
     ${count ? `<ul class="ps-result-list">${bars.join('')}</ul>` : '<p class="ps-empty">本轮没有收到作答。</p>'}
-    ${state.decision?.title ? `<div class="ps-branch">${icon('network', 18)}<div><span>课堂讨论方向</span><strong>${esc(state.decision.title)}</strong></div></div>` : ''}
+    ${state.decision?.title ? `<div class="ps-branch">${icon('network', 18)}<div><span>课堂讨论方向</span><strong>${renderRichMathHtml(state.decision.title)}</strong></div></div>` : ''}
   </section>`;
 }
 
@@ -124,13 +126,13 @@ function answerForm(state, draft, response, phaseIndex, ctx, reasonFocus = false
   const options = state.lesson.options.map((option, index) => `
     <label class="ps-option">
       <input type="radio" id="student-option-${index}" name="optionId" value="${esc(option.id)}" required${option.id === draft.optionId ? ' checked' : ''}>
-      <span class="ps-letter" aria-hidden="true">${String.fromCharCode(65 + index)}</span><span>${esc(option.label)}</span><span class="ps-radio" aria-hidden="true"></span>
+      <span class="ps-letter" aria-hidden="true">${String.fromCharCode(65 + index)}</span><span>${renderRichMathHtml(option.label)}</span><span class="ps-radio" aria-hidden="true"></span>
     </label>`);
   return `<form class="ps-form" aria-labelledby="student-form-title">
     <fieldset ${state.lesson.activityId==='step-fault@1'?'class="visually-hidden"':''}><legend id="student-form-title">选择一个答案</legend><div class="ps-options">${options.join('')}</div></fieldset>
     ${phaseIndex === null ? '' : `<div class="ps-sample"><div><label for="student-power">预测 A 端归一化光强</label><output for="student-power" data-power>${Number(draft.power)}%</output></div><span>分配给你的相位差为 ${esc(phaseLabel(phaseIndex))}。</span>
       <input id="student-power" name="power" type="range" min="0" max="100" step="1" value="${Number(draft.power)}" aria-valuetext="${Number(draft.power)}%"><p aria-hidden="true"><span>0%</span><span>100%</span></p></div>`}
-    ${state.lesson.quickReasons?.length ? `<fieldset class="ps-quick-reasons"><legend>理由快选 · 说清判断依据</legend><button type="button" class="ps-reason-focus-button" data-reason-focus aria-pressed="${reasonFocus}">${reasonFocus ? '返回完整题面' : '专注作答理由'}</button>${state.lesson.quickReasons.map((reason, i) => `<button type="button" data-quick-reason="${i}" aria-pressed="${draft.quickReason === i || draft.reason === reason}">${esc(reason)}</button>`).join('')}<small>点选即填入，可继续编辑补充</small></fieldset>` : ''}
+    ${state.lesson.quickReasons?.length ? `<fieldset class="ps-quick-reasons"><legend>理由快选 · 说清判断依据</legend><button type="button" class="ps-reason-focus-button" data-reason-focus aria-pressed="${reasonFocus}">${reasonFocus ? '返回完整题面' : '专注作答理由'}</button>${state.lesson.quickReasons.map((reason, i) => `<button type="button" data-quick-reason="${i}" aria-pressed="${draft.quickReason === i || draft.reason === reason}">${renderRichMathHtml(reason)}</button>`).join('')}<small>点选即填入，可继续编辑补充</small></fieldset>` : ''}
     ${state.lesson.activityId==='step-fault@1'?'<details class="ps-extra-reason"><summary>补充理由（选填）</summary>':''}<div class="ps-input-group"><div><label for="student-reason">作答理由 <span>选填</span></label><span aria-hidden="true" data-reason-count>${draft.reason.length}/280</span></div>
       <textarea id="student-reason" name="reason" rows="3" maxlength="280" placeholder="哪条线索影响了你的选择？">${esc(draft.reason)}</textarea></div>${state.lesson.activityId==='step-fault@1'?'</details>':''}
     <p class="ps-error" data-form-message role="alert"${draft.error ? '' : ' hidden'}>${esc(draft.error)}</p>
@@ -252,7 +254,8 @@ export function renderStudent(root, ctx) {
   const collecting = state.phase === 'collect';
   const closed = state.phase === 'closed';
   const current = collecting ? null : responses.filter(item => Number(item.round) === round);
-  const signature = JSON.stringify([state.phase, state.demo, participant, response, previous, state.decision, current, ctx.mode, ctx.connected]);
+  const signature = JSON.stringify([state.phase, state.demo, participant, response, previous, state.decision,
+    state.revisionPrompt, state.aiPeerRevealed, current, ctx.mode, ctx.connected]);
   if (model.signature === signature && root.firstElementChild?.classList.contains('ps-student')) return;
   const focus = captureStudentFocus(root);
   const keepPreviousOpen = model.signature && Boolean(root.querySelector('.ps-previous')?.open);
@@ -270,12 +273,12 @@ export function renderStudent(root, ctx) {
     <header class="ps-top"><div class="ps-top-inner"><div class="ps-brand"><img src="./assets/mark.svg" width="34" height="34" alt=""><strong>共演智课</strong><span>学生端</span></div><div class="ps-room"><span>课堂码</span><strong>${esc(state.code)}</strong></div></div></header>
     <div class="ps-body">
       ${reconnecting ? `<p class="ps-network" role="status">${icon('radio', 17)}正在恢复实时课堂连接。</p>` : ''}
-      <header class="ps-hero"><div class="ps-hero-meta"><span>${esc(lesson.subject || '课堂互动')}</span><span aria-hidden="true"></span><span>第 ${round} 轮</span>${state.demo ? '<span aria-hidden="true"></span><span>模拟班级演示</span>' : ''}</div>
-        <div class="ps-hero-title"><h1 id="student-lesson-title" tabindex="-1">${esc(lesson.title)}</h1><span class="ps-phase ps-phase--${esc(state.phase)}">${icon(phase.icon, 15)}${phase.label}</span></div></header>
+      <header class="ps-hero"><div class="ps-hero-meta"><span>${renderRichMathHtml(lesson.subject || '课堂互动')}</span><span aria-hidden="true"></span><span>第 ${round} 轮</span>${state.demo ? '<span aria-hidden="true"></span><span>模拟班级演示</span>' : ''}</div>
+        <div class="ps-hero-title"><h1 id="student-lesson-title" tabindex="-1">${renderRichMathHtml(lesson.title)}</h1><span class="ps-phase ps-phase--${esc(state.phase)}">${icon(phase.icon, 15)}${phase.label}</span></div></header>
        ${takeawayCard(state, participantId, esc)}
        ${closed ? '<details class="ps-closed-details"><summary>查看本轮题目、全班结果与课堂记录</summary>' : ''}
        <div class="ps-columns"><div class="ps-main-column"><section class="ps-card ps-task" aria-labelledby="student-question-title">
-        <div class="ps-question"><p>${icon('book', 17)}<span id="student-question-title">本轮问题</span></p><div>${esc(promptFor(state))}</div></div>
+        <div class="ps-question"><p>${icon('book', 17)}<span id="student-question-title">本轮问题</span></p><div>${renderRichMathHtml(promptFor(state))}</div></div>
         ${moduleHtml(lesson,state,{readonly:true,selectable:collecting&&joined,selectedId:draft.optionId})}${responseReceipt(response, optionFor(response), ctx, collecting)}
         ${model.formKind === 'join' ? joinForm(draft, ctx) : ''}
          ${model.formKind === 'answer' ? answerForm(state, draft, response, phaseIndex, ctx, model.reasonFocus) : ''}

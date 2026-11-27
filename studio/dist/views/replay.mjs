@@ -2,8 +2,10 @@ import { renderCognitionReport } from './cognition.mjs';
 import { createMaterialNotebook } from '../core/material-notebook.mjs';
 import { projectRoom } from '../core/transport.mjs';
 import { analyze } from '../core/engine.mjs';
-import { cognitionReport } from '../core/cognition.mjs';
-const review = { room: null, index: -1, query: '', group: 'all' };
+import { HIGH_ERROR_ACCURACY, lectureReviewEpisodes, pilotResponses, wholeDeckPilotMetrics } from '../core/cognition.mjs';
+import { buildTeacherReportHtml, downloadHtml } from '../core/report-export.mjs';
+const review = { room: null, index: -1, query: '', group: 'all', pageNumber: null,
+  memory: { busy: false, message: '', returnTarget: null } };
 const mounted = new WeakMap();
 const groups = [
   ['all', '全部'], ['participation', '参与与作答'], ['teaching', '教学决定'], ['room', '课堂操作'],
@@ -27,6 +29,14 @@ const eventTypes = {
   close: { group: 'room', name: '结束课堂', icon: 'check' },
 };
 const phaseLabels = { collect: '收集中', reveal: '已公布', branch: '讨论中', closed: '已结束' };
+const activityLabels = {
+  'concept-diagnosis@1': '概念诊断', 'step-fault@1': '逐行找茬',
+  'param-explorer@1': '公式沙盒', 'evidence-weighing@1': '证据权衡',
+};
+const displayPercent = value => value == null ? '—' : `${value}%`;
+const displayGain = value => value == null ? '—' : `${value >= 0 ? '+' : '−'}${Math.abs(value)} pp`;
+const displaySource = source => source === 'live' ? '真实学生作答' : '模拟作答';
+const samplePolicy = '互动提交者跨页去重，填写率按作答份数，正解率按可计分页等权平均，改答率按同页两轮配对。';
 
 function entryType(type) {
   return Object.hasOwn(eventTypes, type) ? eventTypes[type] : { group: 'room', name: '教学节点', icon: 'list' };
@@ -105,15 +115,93 @@ function eventEvidence(event, state, currentLesson, ctx, searching) {
     ${ids.length || ['branch', 'analyze'].includes(event.type) ? `<section class="pr-evidence-section" aria-label="关联作答"><h4>关联作答</h4>${citedResponses(ids, state, currentLesson, ctx)}<p class="pr-evidence-note">同一份作答更新后，这里显示最新保存的内容。</p></section>` : ''}`;
 }
 
-function pairedChange(state) {
-  if (Number(state.round) !== 2 || !['reveal', 'closed'].includes(state.phase)) return null;
-  const responses = state.responses ?? [];
-  const first = new Map(responses.filter(item => Number(item.round) === 1).map(item => [item.participantId, item]));
-  const pairs = responses.filter(item => Number(item.round) === 2 && first.get(item.participantId)?.simulated === item.simulated && first.has(item.participantId));
-  const real = pairs.filter(item => !item.simulated);
-  const sample = real.length ? real : pairs;
-  if (!sample.length) return null;
-  return { changed: sample.filter(item => first.get(item.participantId).optionId !== item.optionId).length, total: sample.length, live: Boolean(real.length) };
+function pilotValues(metrics) {
+  const { topMuddyPage: muddy } = metrics;
+  return [
+    ['participantCount', '参与总人数', `${metrics.participantCount} 人`],
+    ['reasonFillRate', '作答理由填写率', displayPercent(metrics.reasonFillRate)],
+    ['firstRoundAccuracy', '首轮平均正解率', displayPercent(metrics.firstRoundAccuracy)],
+    ['secondRoundAccuracy', '二轮平均正解率', displayPercent(metrics.secondRoundAccuracy)],
+    ['accuracyGainPp', '净跃迁百分点', displayGain(metrics.accuracyGainPp)],
+    ['pairedRevisionRate', '配对改答率', displayPercent(metrics.pairedRevisionRate)],
+    ['interactivePageCount', '互动页数', `${metrics.interactivePageCount} 页`],
+    ['topMuddyPage', '最高存疑讲授页', muddy ? `第 ${muddy.pageNumber} 页 · ${muddy.count} 人` : '—', muddy?.title],
+  ];
+}
+
+function pilotMarkdown(state, metrics) {
+  const markdownText = text => String(text ?? '').replace(/[\r\n]+/g, ' ').replace(/[\\[\]<>*_`#|]/g, '\\$&');
+  const date = eventDate(state.events?.[0]?.at)?.toLocaleDateString('zh-CN');
+  const real = metrics.source === 'live';
+  return [
+    `## 课堂试点战报（${real ? '实测' : '模拟演练'}）`, '',
+    `- 课件：${markdownText(state.lecture?.title ?? state.lesson?.title ?? '课堂记录')}`,
+    `- 课堂码：${markdownText(state.code)}${date ? ` · 日期 ${date}` : ''}`,
+    `- 作答来源：${displaySource(metrics.source)}${real ? '' : '（演练样本）'}`, '',
+    '| 核心指标 | 结果 |', '| --- | --- |',
+    ...pilotValues(metrics).map(([, label, value, detail]) => `| ${label} | ${value}${detail ? ` · ${markdownText(detail)}` : ''} |`),
+    '', `口径：${samplePolicy}`, '',
+  ].join('\n');
+}
+
+function pilotCard(metrics, esc) {
+  return `<section class="pr-pilot" aria-labelledby="replay-pilot-title" data-pilot-kpis>
+    <header class="pr-section-head"><div><h2 id="replay-pilot-title">📊 课堂实测核心指标汇总</h2>
+      <p>${samplePolicy}</p></div><span class="pr-sample" data-pilot-source="${metrics.source}">${displaySource(metrics.source)}</span></header>
+    <dl class="pr-pilot-values">${pilotValues(metrics).map(([key, label, value, detail]) => `<div><dt>${label}</dt>
+      <dd data-pilot-value="${key}">${value}</dd>${detail ? `<dd class="pr-value-detail">${esc(detail)}</dd>` : ''}</div>`).join('')}</dl>
+    <footer class="pr-actions"><button id="replay-copy-pilot" class="pr-button pr-primary" type="button" data-copy-pilot>📋 一键复制实测战报 Markdown</button>
+      <button id="replay-teacher-report" class="pr-button" type="button" data-export-teacher-report>🖨 导出可打印教研复盘报告（HTML）</button></footer>
+    <p class="pr-status-line" data-export-status role="status"></p>
+    <textarea class="pr-markdown" data-pilot-markdown aria-label="战报 Markdown" readonly hidden></textarea>
+  </section>`;
+}
+
+function pageSwitcher(pages, selected, esc) {
+  return `<section class="pr-switcher" data-replay-switcher aria-labelledby="replay-pages-title">
+    <header class="pr-section-head"><h2 id="replay-pages-title">全卷页面学情切换条</h2></header>
+    ${pages.length ? `<div class="pr-page-tabs" role="group" aria-label="选择复盘页">${pages.map(page => `<button type="button"
+      class="pr-page-chip" data-replay-page="${page.pageNumber}" aria-pressed="${selected === page.pageNumber}">
+      <span><strong>第 ${page.pageNumber} 页</strong><small>${activityLabels[page.activityId] ?? (page.kind === 'lecture' ? '讲授' : '互动')}</small></span>
+      <span class="pr-page-name">${esc(page.title)}</span>
+      <span class="pr-page-result">${page.kind === 'lecture' ? `🙋 ${page.muddyCount} 人存疑` : `${displayPercent(page.firstRoundAccuracy)} → ${displayPercent(page.secondRoundAccuracy)}${page.source === 'simulated' && page.participantCount ? ' · 模拟' : ''}`}</span>
+    </button>`).join('')}</div>` : '<p class="pr-empty-line">本课还没有开启互动或收到讲授页的存疑标记。</p>'}
+  </section>`;
+}
+
+function pageEvidence(state, episode, page) {
+  const responses = pilotResponses(episode, page.source);
+  const reportState = { ...state, ...episode, responses, round1Tallies: undefined, pairedRevisions: undefined,
+    simulatedResponseCount: page.source === 'simulated' ? responses.length : 0 };
+  if (!responses.length) return { reportState, diagnosis: null };
+  const round = page.firstRoundCount ? 1 : 2;
+  const analysis = analyze({ ...reportState, round });
+  const { analysis: diagnosis } = projectRoom({ ...reportState, round, phase: 'reveal', analysis }, 'stage');
+  return { reportState, diagnosis, round };
+}
+
+function pageReview(state, page, episode, branchEvent, ctx) {
+  const { esc, icon } = ctx;
+  const heading = page.pageNumber == null ? esc(page.title) : `第 ${page.pageNumber} 页 · ${esc(page.title)}`;
+  if (page.kind === 'lecture') return `<header class="pr-section-head"><h2>${heading}</h2><span class="pr-sample">讲授页</span></header>
+    <p class="pr-muddy-detail"><strong>🙋 ${page.muddyCount} 人存疑</strong><span>可在备课中枢回到这一页检查定义、推导或示例。</span></p>`;
+  const { reportState, diagnosis, round } = pageEvidence(state, episode, page);
+  const { decision } = reportState;
+  const contrast = diagnosis?.contrastPair ?? [];
+  return `<header class="pr-section-head"><div><h2>${heading}</h2>
+      <p>${activityLabels[page.activityId] ?? '课堂互动'} · 首轮 ${page.firstRoundCount} 份 · 二轮 ${page.secondRoundCount} 份${page.muddyCount ? ` · ${page.muddyCount} 人存疑` : ''}</p></div>
+      <span class="pr-sample" data-page-source="${page.source}">${displaySource(page.source)}</span></header>
+    ${renderCognitionReport(reportState, esc) || `<p class="pr-empty-line">${page.participantCount ? `首轮正解率 ${displayPercent(page.firstRoundAccuracy)}。公布二轮结果后可查看两轮分布。` : '本页还没有收到作答。'}</p>`}
+    <section class="pr-page-contrast" data-replay-contrast aria-label="典型红蓝对撞原话">
+      <h3>典型红蓝对撞原话${round ? ` <small>第 ${round} 轮</small>` : ''}</h3>
+      ${contrast.length ? `<div class="pr-quote-pair">${contrast.map(item => `<article class="${item.tone === 'alert' ? 'pr-quote-red' : 'pr-quote-blue'}">
+        <strong>${esc(item.sideLabel)}</strong><blockquote>${esc(item.quote)}</blockquote></article>`).join('')}</div>` : `<p class="pr-empty-line">${diagnosis ? '本轮尚无可供对照的两条理由。' : '学生提交理由后可查看对照原话。'}</p>`}
+    </section>
+    ${decision ? `<section class="pr-highlight"><span class="pr-icon pr-icon--teaching">${icon('network', 18)}</span><div><h3>本页采用的靶向教学策略</h3><strong>${esc(decision.title ?? decision.branchId)}</strong></div>
+      ${branchEvent ? `<button class="pr-text-button" id="replay-find-branch" type="button" data-find-branch>定位事件${icon('arrow-right', 15)}</button>` : ''}</section>` : ''}
+    ${decision && !branchEvent ? `<details class="pr-archive-branch"><summary id="replay-branch-evidence">本页靶向教学策略的关联作答</summary>${citedResponses(decision.evidenceIds, state, true, ctx)}</details>` : ''}
+    ${page.pageNumber == null ? '' : `<footer class="pr-actions"><button id="replay-save-page" class="pr-button" type="button" data-replay-memory${page.versionId && page.participantCount ? '' : ' data-memory-unavailable disabled'}>将复盘保存到第 ${page.pageNumber} 页</button>
+      ${!page.versionId ? '<span>从备课版本开课后，可以把复盘保存到原页。</span>' : ''}</footer>`}`;
 }
 
 function exportArchive(state) {
@@ -122,7 +210,7 @@ function exportArchive(state) {
     decision: state.decision, events: state.events,
     responses: state.responses?.map(({ id, round, optionId, reason, simulated }) => ({ id, round, optionId, reason, simulated })),
     options: state.lesson?.options,
-    ...(state.lecture && {lecture:state.lecture,activities:state.lectureArchive.map(item=>({
+    ...(state.lecture && {lecture:state.lecture,activities:(state.lectureArchive ?? []).map(item=>({
       sourcePage:item.pageNumber,versionId:item.versionId,title:item.lesson.title,options:item.lesson.options,
       decision:item.decision,responses:item.responses.map(({id,round,optionId,reason,simulated})=>({id,round,optionId,reason,simulated})),
     }))}),
@@ -138,7 +226,8 @@ function exportArchive(state) {
 function captureReplayFocus(root) {
   const active = document.activeElement;
   if (!root.contains(active)) return () => {};
-  const selector = active.id ? `#${active.id}` : active.dataset.event != null ? `[data-event="${active.dataset.event}"]` : '';
+  const selector = active.id ? `#${active.id}` : active.dataset.event != null ? `[data-event="${active.dataset.event}"]`
+    : active.dataset.replayPage != null ? `[data-replay-page="${active.dataset.replayPage}"]` : '';
   const { selectionStart, selectionEnd } = active;
   return () => {
     if (!selector) return;
@@ -168,43 +257,39 @@ export function renderReplay(root, ctx) {
   mounted.set(root, view);
   const events = eventRows(state.events ?? []);
   const latest = events.at(-1);
-  if (review.room !== state.code) Object.assign(review, { room: state.code, index: events.length - 1, query: '', group: 'all' });
+  if (review.room !== state.code) Object.assign(review, {
+    room: state.code, index: events.length - 1, query: '', group: 'all', pageNumber: null,
+    memory: { busy: false, message: '', returnTarget: null },
+  });
   const focus = captureReplayFocus(root);
   const oldList = root.querySelector('.pr-timeline');
   const lastScroll = oldList?.scrollTop ?? 0;
-  const keepBranchOpen = Boolean(root.querySelector('.pr-archive-branch')?.open);
-  const responses = [...(state.responses ?? []),...(state.lectureArchive ?? []).flatMap(item=>item.responses)];
+  const sameRoom = previousView?.room === state.code;
+  const lastPageScroll = sameRoom ? root.querySelector('.pr-page-tabs')?.scrollLeft ?? 0 : 0;
+  const keepBranchOpen = sameRoom && Boolean(root.querySelector('.pr-archive-branch')?.open);
+  const metrics = wholeDeckPilotMetrics(state);
+  const episodes = new Map(lectureReviewEpisodes(state));
+  const responses = [...episodes.values()].flatMap(item => item.responses ?? []);
   const simulated = responses.filter(item => item.simulated).length;
-  const episode = Number(state.round) === 2 ? state
-    : state.lectureArchive?.findLast(item => Number(item.round) === 2) ?? state.lectureArchive?.at(-1) ?? state;
-  const reportState = { ...state, ...episode };
-  const change = pairedChange(reportState);
-  const decision = reportState.decision;
-  const versionId = episode.versionId ?? state.lecture?.sourceVersion;
-  const pageNumber = episode.pageNumber ?? state.lecture?.pageNumber;
-  const branchEvent = events.findLast(event => event.type === 'branch' && event.lessonStart === latest?.lessonStart && event.detail?.branchId === decision?.branchId);
-  const contrast = reportState.analysis?.contrastPair ?? reportState.firstRoundAnalysis?.contrastPair ?? [];
-  const mistake = contrast[0]?.quote;
+  const highErrorPages = metrics.pages.filter(page => page.highError && page.versionId);
+  const memory = review.memory;
+  let selected = metrics.pages.find(page => page.pageNumber === review.pageNumber) ??
+    metrics.pages.find(page => page.kind === 'interaction') ?? metrics.pages[0];
+  review.pageNumber = selected?.pageNumber ?? null;
   root.innerHTML = `<div class="pr-review">
-    <header class="pr-page-header"><div><h1>课后复盘</h1><p>${esc(state.lecture?.title ?? state.lesson?.title ?? '课堂记录')}</p></div>
-      <button class="pr-button" id="replay-return" type="button">${icon('arrow-left', 16)}返回课堂</button></header>
-    <section class="pr-activity-summary" aria-label="本课结果">
-      <h2>本课作答</h2>
-      <p>${responses.length - simulated} 份学生作答${simulated ? ' · ' + simulated + ' 份模拟' : ''}${change ? ' · ' + change.changed + ' / ' + change.total + ' 人改答' : ''}</p>
-      ${mistake ? '<p><b>值得回看的理由</b> · '+esc(mistake)+'</p>' : ''}
-      ${versionId && pageNumber && episode.responses?.length ? `<button type="button" class="pr-button" data-replay-memory>将复盘保存到第 ${esc(pageNumber)} 页</button><p data-memory-status role="status"></p>` : ''}
-    </section>
-    <details class="pr-detail-toggle"><summary>查看完整记录</summary>
-    <div class="pr-detail-actions"><button class="pr-button" id="replay-export" type="button"${events.length ? '' : ' disabled'}>${icon('download', 16)}导出记录</button></div>
-    ${renderCognitionReport(reportState, esc)}
-    <section class="pr-overview" aria-label="课堂概览">
-      <div class="pr-class"><span class="pr-class-icon">${icon('book', 26)}</span><div><div class="pr-class-meta"><span>课堂码 <b>${esc(state.code ?? '')}</b></span><span>第 ${esc(state.round ?? 1)} 轮</span>${phaseLabels[state.phase] ? `<span class="pr-status${state.phase === 'closed' ? ' is-closed' : ''}">${phaseLabels[state.phase]}</span>` : ''}${state.demo ? '<span>模拟班级演示</span>' : ''}</div><h2>${esc(state.lesson?.title ?? '课堂存档')}</h2></div></div>
-      <dl class="pr-stats"><div><dt>教学节点</dt><dd>${events.length}</dd></div><div><dt>本课真实作答</dt><dd>${responses.length - simulated}</dd></div><div><dt>本课模拟作答</dt><dd>${simulated}</dd></div></dl>
-    </section>
-    ${decision || change ? `<div class="pr-highlights">
-      ${decision ? `<section class="pr-highlight"><span class="pr-icon pr-icon--teaching">${icon('network', 18)}</span><div><h2>本课采用的靶向教学策略</h2><strong>${esc(decision.title ?? decision.branchId)}</strong></div>${branchEvent ? `<button class="pr-text-button" id="replay-find-branch" type="button">定位事件${icon('arrow-right', 15)}</button>` : ''}</section>` : ''}
-      ${change ? `<section class="pr-highlight"><span class="pr-icon">${icon('chart', 18)}</span><div><h2>${change.live ? '两轮均提交的学生' : '两轮模拟作答'}</h2><strong>${change.changed} / ${change.total} 位更换了选项</strong></div></section>` : ''}
-    </div>` : ''}
+    <header class="pr-page-header"><div><h1>课后复盘</h1><p>${esc(state.lecture?.title ?? state.lesson?.title ?? '课堂记录')}</p>
+      <div class="pr-class-meta"><span>课堂码 <b>${esc(state.code ?? '')}</b></span>
+      ${phaseLabels[state.phase] ? `<span class="pr-status${state.phase === 'closed' ? ' is-closed' : ''}">${phaseLabels[state.phase]}</span>` : ''}
+      <span>${responses.length - simulated} 份学生作答${simulated ? ` · ${simulated} 份模拟` : ''}</span></div></div>
+      <div class="pr-page-actions"><button class="pr-button" id="replay-export" type="button"${events.length ? '' : ' disabled'}>${icon('download', 16)}导出记录</button>
+      <button class="pr-button" id="replay-return" type="button">${icon('arrow-left', 16)}返回课堂</button></div></header>
+    ${state.lecture ? pageSwitcher(metrics.pages, review.pageNumber, esc) : ''}
+    ${pilotCard(metrics, esc)}
+    ${state.lecture ? `<section class="pr-memory-rail" aria-label="课件记忆回流"><div class="pr-actions">
+      <button id="replay-save-batch" class="pr-button" type="button" data-batch-memory${highErrorPages.length ? '' : ' data-memory-unavailable disabled'}>🧠 一键批量回流全部高错页至课件记忆库</button>
+      <span>首轮正解率 &lt; ${HIGH_ERROR_ACCURACY}% · ${highErrorPages.length} 页可回流</span></div>
+      <div class="pr-actions"><p class="pr-status-line" data-memory-status role="status"></p><button class="pr-text-button" id="replay-material-return" type="button" data-return-materials hidden>返回备课中枢${icon('arrow-right', 15)}</button></div></section>` : ''}
+    <section class="pr-page-panel" data-replay-page-panel aria-label="本页教学复盘"${selected ? '' : ' hidden'}></section>
     <div class="pr-columns">
       <section class="pr-card pr-list-panel" aria-labelledby="replay-timeline-title">
         <div class="pr-panel-header"><h2 id="replay-timeline-title">课堂演化轨迹</h2><span class="pr-match-count" data-match-count role="status"></span></div>
@@ -215,12 +300,13 @@ export function renderReplay(root, ctx) {
       <section class="pr-card pr-detail-panel" aria-labelledby="replay-detail-title">
         <div class="pr-panel-header"><h2 id="replay-detail-title">事件详情</h2><div class="pr-stepper"><button class="pr-button" type="button" id="replay-before" aria-label="上一条">${icon('chevron-right', 16)}<span>上一条</span></button><span data-counter aria-live="polite"></span><button class="pr-button" type="button" id="replay-after" aria-label="下一条"><span>下一条</span>${icon('chevron-right', 16)}</button></div></div>
         <div class="pr-entry-content"></div>
-        ${decision && !branchEvent ? `<details class="pr-archive-branch"${keepBranchOpen ? ' open' : ''}><summary id="replay-branch-evidence">本课靶向教学策略的关联作答</summary>${citedResponses(decision.evidenceIds, state, true, ctx)}</details>` : ''}
       </section>
     </div>
-    </details>
   </div>`;
 
+  const switcher = root.querySelector('.pr-page-tabs');
+  if (switcher) switcher.scrollLeft = lastPageScroll;
+  const pagePanel = root.querySelector('[data-replay-page-panel]');
   const list = root.querySelector('.pr-timeline');
   const search = root.querySelector('#replay-search');
   const content = root.querySelector('.pr-entry-content');
@@ -312,36 +398,128 @@ export function renderReplay(root, ctx) {
   before.onclick = () => step(-1, before);
   after.onclick = () => step(1, after);
   root.querySelector('#replay-return').onclick = () => ctx.go('desk');
-  root.querySelector('[data-replay-memory]')?.addEventListener('click', async event => {
-    const button = event.currentTarget;
+  root.querySelector('#replay-export').onclick = () => exportArchive(state);
+
+  function updateMemoryControls() {
+    if (mounted.get(root)?.room !== state.code) return;
     const status = root.querySelector('[data-memory-status]');
-    if (!versionId || !pageNumber) { status.textContent = '请在课件活化中打开原 PPT，在对应页开启互动后再回流。'; return; }
-    button.disabled = true;
+    if (!status) return;
+    status.textContent = memory.message;
+    const returnButton = root.querySelector('[data-return-materials]');
+    returnButton.hidden = !memory.returnTarget;
+    returnButton.disabled = memory.busy;
+    for (const button of root.querySelectorAll('[data-replay-memory], [data-batch-memory]')) {
+      button.disabled = memory.busy || button.hasAttribute('data-memory-unavailable');
+    }
+  }
+
+  function paintSelectedPage(reopen = false) {
+    if (!selected) return;
+    const episode = episodes.get(selected.pageNumber);
+    const branchId = episode?.decision?.branchId;
+    const branchEvent = branchId && events.findLast(event => event.type === 'branch' && event.detail?.branchId === branchId &&
+      (state.lecture ? (event.detail.lecturePageNumber ?? event.detail.pageNumber) === selected.pageNumber : event.lessonStart === latest?.lessonStart));
+    pagePanel.innerHTML = pageReview(state, selected, episode, branchEvent, ctx);
+    if (reopen && pagePanel.querySelector('.pr-archive-branch')) pagePanel.querySelector('.pr-archive-branch').open = true;
+    const locate = pagePanel.querySelector('[data-find-branch]');
+    if (locate) locate.onclick = () => {
+      clearFilters();
+      select(branchEvent.index);
+      const heading = content.querySelector('h3');
+      heading?.focus({ preventScroll: true });
+      heading?.scrollIntoView({ block: 'nearest' });
+    };
+    updateMemoryControls();
+  }
+
+  switcher?.addEventListener('click', event => {
+    const button = event.target.closest('[data-replay-page]');
+    if (!button) return;
+    const page = metrics.pages.find(item => String(item.pageNumber) === button.dataset.replayPage);
+    if (!page || page === selected) return;
+    selected = page;
+    review.pageNumber = page.pageNumber;
+    for (const chip of switcher.querySelectorAll('[data-replay-page]')) chip.setAttribute('aria-pressed', String(chip === button));
+    paintSelectedPage();
+  });
+  switcher?.addEventListener('keydown', event => {
+    const buttons = [...switcher.querySelectorAll('[data-replay-page]')];
+    const current = buttons.indexOf(event.target);
+    const moves = { ArrowLeft: buttons[current - 1], ArrowRight: buttons[current + 1], Home: buttons[0], End: buttons.at(-1) };
+    if (current < 0 || !Object.hasOwn(moves, event.key)) return;
+    event.preventDefault();
+    moves[event.key]?.focus();
+    moves[event.key]?.click();
+  });
+
+  async function saveMemories(pages) {
+    if (!pages.length || memory.busy) return;
+    memory.busy = true;
+    memory.message = `正在写入 ${pages.length} 页课件记忆…`;
+    updateMemoryControls();
+    const saved = [];
+    const failed = [];
     try {
       const notebook = createMaterialNotebook();
-      const diagnosis = analyze({ ...reportState, round: 1 });
-      const visible = projectRoom({ ...reportState, analysis: diagnosis }, 'stage', null);
-      const report = cognitionReport(reportState);
-      const text = [reportState.lesson.title, visible.analysis?.headline, visible.analysis?.summary,
-        ...(visible.analysis?.contrastPair ?? []).map(p => `${p.sideLabel}：${p.quote}`),
-        `两轮战报：正解 ${report.firstCorrect ?? '待判定'}% → ${report.secondCorrect ?? '待判定'}%；配对改选 ${report.paired.changed}/${report.paired.total}。`,
-        reportState.responses.some(r => r.simulated) ? '本课含已标记模拟作答，用于演练。' : '本课现场作答诊断。'].filter(Boolean).join('\n');
-      await notebook.savePageNote(versionId, pageNumber, { id: `review-${state.code}-${pageNumber}`, kind: 'annotation', packet: { text }, source: { type: 'classroom-review', room: state.code, pageNumber } });
-      await notebook.setLastPage(versionId, pageNumber);
-      sessionStorage.setItem('polyphony.material.return', JSON.stringify({ versionId, pageNumber }));
-      ctx.toast('典型误区已回流并锚定原页');
-      ctx.go('materials');
-    } catch (error) { status.textContent = error.message; button.disabled = false; }
+      for (const page of pages) {
+        const { versionId, pageNumber } = page;
+        try {
+          const { diagnosis } = pageEvidence(state, episodes.get(pageNumber), page);
+          const text = [page.title, diagnosis?.headline, diagnosis?.summary,
+            ...(diagnosis?.contrastPair ?? []).map(item => `${item.sideLabel}：${item.quote}`),
+            `两轮战报：正解率 ${displayPercent(page.firstRoundAccuracy)} → ${displayPercent(page.secondRoundAccuracy)}，配对改答 ${page.pairedChangedCount}/${page.pairedCount}。`,
+            `样本来源：${displaySource(page.source)}。`].filter(Boolean).join('\n');
+          await notebook.savePageNote(versionId, pageNumber, {
+            id: `review-${state.code}-${pageNumber}`, kind: 'annotation', packet: { text },
+            source: { type: 'classroom-review', room: state.code, pageNumber },
+          });
+          saved.push({ versionId, pageNumber });
+        } catch (error) { failed.push(`第 ${pageNumber} 页：${error.message}`); }
+      }
+      if (saved.length) memory.returnTarget = saved[0];
+      memory.message = `已回流 ${saved.length} 页${saved.length ? `（${saved.map(item => item.pageNumber).join('、')}）` : ''}${failed.length ? `。${failed.length} 页写入失败：${failed.join('，')}` : '至课件记忆库。'}`;
+      if (saved.length && review.room === state.code) ctx.toast(`已回流 ${saved.length} 页课件记忆`);
+    } catch (error) { memory.message = `课件记忆写入失败：${error.message}`; }
+    finally { memory.busy = false; updateMemoryControls(); }
+  }
+
+  pagePanel.addEventListener('click', event => {
+    if (event.target.closest('[data-replay-memory]')) void saveMemories([selected]);
   });
-  root.querySelector('#replay-export').onclick = () => exportArchive(state);
-  const findBranch = root.querySelector('#replay-find-branch');
-  if (findBranch) findBranch.onclick = () => {
-    clearFilters();
-    select(branchEvent.index);
-    const heading = content.querySelector('h3');
-    heading?.focus({ preventScroll: true });
-    heading?.scrollIntoView({ block: 'nearest' });
+  root.querySelector('[data-batch-memory]')?.addEventListener('click', () => void saveMemories(highErrorPages));
+  root.querySelector('[data-return-materials]')?.addEventListener('click', async () => {
+    const target = memory.returnTarget;
+    if (!target || memory.busy) return;
+    memory.busy = true;
+    updateMemoryControls();
+    try {
+      await createMaterialNotebook().setLastPage(target.versionId, target.pageNumber);
+      try { sessionStorage.setItem('polyphony.material.return', JSON.stringify(target)); } catch { /* The last page is already saved. */ }
+      ctx.go('materials');
+    } catch (error) { memory.message = error.message; }
+    finally { memory.busy = false; updateMemoryControls(); }
+  });
+
+  const exportStatus = root.querySelector('[data-export-status]');
+  const markdownField = root.querySelector('[data-pilot-markdown]');
+  root.querySelector('[data-copy-pilot]').onclick = async () => {
+    const markdown = pilotMarkdown(state, metrics);
+    if (await ctx.copy?.(markdown)) {
+      markdownField.hidden = true;
+      exportStatus.textContent = '战报 Markdown 已复制。';
+    } else {
+      markdownField.value = markdown;
+      markdownField.hidden = false;
+      markdownField.select();
+      exportStatus.textContent = '战报已选中，可以手动复制。';
+    }
   };
+  root.querySelector('[data-export-teacher-report]').onclick = () => {
+    downloadHtml(buildTeacherReportHtml(state, metrics), `教研复盘-${state.code || '课堂'}.html`);
+    exportStatus.textContent = '已生成可打印教研复盘报告。';
+  };
+  paintSelectedPage(keepBranchOpen);
+  updateMemoryControls();
   refresh({ reveal: !oldList, scroll: lastScroll });
   focus();
 }

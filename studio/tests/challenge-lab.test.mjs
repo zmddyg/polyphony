@@ -75,7 +75,7 @@ test('class experiment votes can be revised, survive other votes, and expire at 
 test('the language model sees only class evidence and must choose an available option', async () => {
   const state=advanceChallenge({...newChallenge('rc'),fault:'r'},{action:'measure',value:'early'});
   let response={choice:'open',reason:'两台电路的时间常数相同，读数也相同。'};
-  const provider={model:'test-peer',key:'test',baseUrl:'https://provider.example/v1',outputMode:'json_schema',
+  const provider={model:'test-peer',key:'fixture-experiment-peer-credential',baseUrl:'https://provider.example/v1',outputMode:'json_schema',
     fetchImpl:async(_url,options)=>{
       const packet=JSON.parse(options.body);
       assert.equal(packet.response_format.json_schema.name,'experiment_peer');

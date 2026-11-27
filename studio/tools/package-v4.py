@@ -26,7 +26,15 @@ DEMO_MATERIALS = (
     '共演智课-系统架构与Harness协议.pdf',
     '共演智课-单文件离线演示版.html',
 )
-STUDIO_FILES = {'.dockerignore', 'Dockerfile', 'package.json', 'start.sh'}
+STUDIO_FILES = {
+    '.dockerignore', 'AGENT.md', 'Dockerfile', 'media-search.mjs', 'package.json',
+    'public-https.mjs', 'reference-lookup.mjs', 'start.sh',
+}
+REQUIRED_DIST_FILES = (
+    'app.mjs', 'index.html', 'core/browser-reference-lookup.mjs',
+    'vendor/katex/katex.mjs', 'vendor/katex/katex-embedded.css', 'vendor/katex/LICENSE',
+)
+STUDIO_DEMO = ('demo/entry.mjs',)
 STUDIO_TOOLS = (
     'material-import-libreoffice.py', 'material-import-pdf.py',
     'material-import-powerpoint.ps1', 'export-offline.mjs',
@@ -66,7 +74,7 @@ def release_entries(delivery):
         screenshots = sorted(delivery.glob(f'{number:02}-*.png'))
         if len(screenshots) != 1:
             raise ValueError(f'Expected one screenshot numbered {number:02} in {delivery}')
-        add_entry(entries, f'{DEMO_PREFIX}/旧版截图/{screenshots[0].name}', screenshots[0], delivery)
+        add_entry(entries, f'{DEMO_PREFIX}/系统截图/{screenshots[0].name}', screenshots[0], delivery)
 
     examples = delivery / '示例课件'
     for pattern, count in (('*-*.pptx', 3), ('*-*.pdf', 1), ('V4原生实战课件/deck-*.json', 6)):
@@ -87,10 +95,14 @@ def release_entries(delivery):
                 add_entry(entries, f'{STUDIO_PREFIX}/{path.relative_to(STUDIO).as_posix()}', path, STUDIO)
     for name in STUDIO_TOOLS:
         add_entry(entries, f'{STUDIO_PREFIX}/tools/{name}', STUDIO / 'tools' / name, STUDIO)
+    for name in STUDIO_DEMO:
+        add_entry(entries, f'{STUDIO_PREFIX}/{name}', STUDIO / name, STUDIO)
 
-    for name in ('server.mjs', '启动共演.cmd', 'dist/index.html', 'dist/app.mjs'):
+    required = (*sorted(STUDIO_FILES), 'server.mjs', '启动共演.cmd',
+                *(f'dist/{name}' for name in REQUIRED_DIST_FILES))
+    for name in required:
         if f'{STUDIO_PREFIX}/{name}' not in entries:
-            raise ValueError(f'Missing launch file: {name}')
+            raise ValueError(f'Missing release file: {name}')
     return entries
 
 

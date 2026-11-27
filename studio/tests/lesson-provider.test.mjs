@@ -37,7 +37,7 @@ test('provider status exposes validated capabilities without disclosing the endp
   }
 });
 
-test('completion requests select exactly one output mode; fenced JSON is normalized only in text mode', async () => {
+test('completion requests select exactly one output mode and normalize fenced JSON in every mode', async () => {
   const source = '```json\r\n' + JSON.stringify(payload) + '\r\n```';
   for (const [outputMode, format] of [
     ['json_object', { type: 'json_object' }],
@@ -59,7 +59,7 @@ test('completion requests select exactly one output mode; fenced JSON is normali
         return reply(source);
       },
     });
-    assert.equal(result, outputMode === 'text' ? JSON.stringify(payload) : source);
+    assert.equal(result, JSON.stringify(payload));
   }
 });
 
@@ -84,19 +84,21 @@ test('native lesson requests reuse the composer schema and the deadline across v
   assert.equal(signals[0], signals[1]);
 });
 
-test('completion rejects refusals, truncation and invalid envelopes before domain validation', async () => {
+test('completion identifies refusals, truncation and invalid envelopes before domain validation', async () => {
   const content = JSON.stringify(payload);
   for (const response of [
     new Response('invalid JSON'),
     Response.json({ choices: { 0: { message: { content } } } }),
     reply('   '),
-    reply(content, { finish_reason: 'length' }),
     reply(content, { finish_reason: 'content_filter' }),
     reply(content, {}, { refusal: 'endpoint-only refusal' }),
   ]) {
     const result = await requestStructuredCompletion({ ...provider, messages, fetchImpl: async () => response });
     assert.equal(result, undefined);
   }
+  await assert.rejects(requestStructuredCompletion({
+    ...provider, messages, fetchImpl: async () => reply(content, { finish_reason: 'length' }),
+  }), /length/u);
 });
 
 test('the chat lecture planner scans every page locally and sends only pages with title or text', async () => {
@@ -121,23 +123,23 @@ test('the chat lecture planner scans every page locally and sends only pages wit
   assert.equal(batches.length, 1);
 });
 
-test('completion transport errors are sanitized and do not replace the deadline reason', async () => {
+test('completion transport errors distinguish throttling, direct network failure and deadline', async () => {
   let discarded = false;
   const body = new ReadableStream({ cancel() { discarded = true; } });
   await assert.rejects(requestStructuredCompletion({
     ...provider, messages, fetchImpl: async () => new Response(body, { status: 429 }),
-  }), { message: '模型服务请求失败。' });
+  }), /HTTP 429/u);
   assert.equal(discarded, true);
 
   await assert.rejects(requestStructuredCompletion({
     ...provider, messages,
     fetchImpl: async () => { throw new Error('endpoint-only details'); },
-  }), { message: '模型服务请求失败。' });
+  }), error => /网络|跨域/u.test(error.message) && !error.message.includes('endpoint-only'));
 
   const reason = new DOMException('test deadline', 'TimeoutError');
   await assert.rejects(requestStructuredCompletion({
     ...provider, messages,
     signal: AbortSignal.abort(reason),
     fetchImpl: async () => { assert.fail('expired deadline reached provider'); },
-  }), error => error === reason);
+  }), /超时/u);
 });
